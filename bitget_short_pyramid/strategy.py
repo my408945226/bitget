@@ -108,13 +108,23 @@ class Strategy:
         return False
 
     def _open_initial(self):
-        """市价起仓"""
-        self.log.info(f"起仓 {self.POSITION_SZ}张")
+        """起仓：三种模式支持"""
+        # 模式优先级：adopt_sell_px > initial_sell_px > 默认市价
+        if self.cfg.adopt_sell_px > 0:
+            self._open_adopt()
+        elif self.cfg.initial_sell_px > 0:
+            self._open_limit()
+        else:
+            self._open_market()
+
+    def _open_market(self):
+        """模式 1：市价起仓"""
+        self.log.info(f"起仓(市价) {self.POSITION_SZ}张")
         resp = self.client.place_order(self.cfg.symbol, "sell", self.POSITION_SZ, 0.0, order_type="market")
         if resp.get("code") != "00000":
             self.log.error(f"起仓失败: {resp.get('msg')}")
             sys.exit(1)
-        
+
         px = 1.76 if self.dry_run else self.client.get_price(self.cfg.symbol)
         if px <= 0:
             try:
@@ -132,6 +142,51 @@ class Strategy:
         self.state["closes"] = 0
         save_state(self.state)
         self.log.info(f"起仓成功 @{px:.6f}")
+
+    def _open_limit(self):
+        """模式 2：限价起仓（指定价格，立即启动网格）"""
+        px = self.cfg.initial_sell_px
+        self.log.info(f"起仓(限价) @ {px:.6f}")
+
+        resp = self.client.place_order(
+            self.cfg.symbol, "sell", self.POSITION_SZ, px,
+            order_type="limit", cl_ord_id=_gen_cl_ord_id("initSELL")
+        )
+        if resp.get("code") != "00000":
+            self.log.error(f"起仓失败: {resp.get('msg')}")
+            sys.exit(1)
+
+        ord_id = resp.get("data", {}).get("orderId")
+        self.state["stack_top"] = px
+        self.state["opens"] = 0
+        self.state["closes"] = 0
+        self.state["pending_sell_ord_id"] = ord_id
+        self.state["pending_sell_px"] = px
+        save_state(self.state)
+        self.log.info(f"限价挂单 {ord_id} @ {px:.6f}，网格已启动")
+
+    def _open_adopt(self):
+        """模式 3：基准价起仓（自动偏移，立即启动网格）"""
+        base_px = self.cfg.adopt_sell_px
+        sell_px = self._round_px(base_px * (1 + self.GRID_PCT))
+        self.log.info(f"起仓(基准) base={base_px:.6f} → SELL@{sell_px:.6f}")
+
+        resp = self.client.place_order(
+            self.cfg.symbol, "sell", self.POSITION_SZ, sell_px,
+            order_type="limit", cl_ord_id=_gen_cl_ord_id("adoptSELL")
+        )
+        if resp.get("code") != "00000":
+            self.log.error(f"起仓失败: {resp.get('msg')}")
+            sys.exit(1)
+
+        ord_id = resp.get("data", {}).get("orderId")
+        self.state["stack_top"] = base_px
+        self.state["opens"] = 0
+        self.state["closes"] = 0
+        self.state["pending_sell_ord_id"] = ord_id
+        self.state["pending_sell_px"] = sell_px
+        save_state(self.state)
+        self.log.info(f"基准挂单 {ord_id} @ {sell_px:.6f}，网格已启动")
 
     def run(self):
         """主循环"""

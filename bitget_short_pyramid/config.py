@@ -14,6 +14,8 @@ class Config:
     leverage: int = 3
     interval: int = 5
     max_notional_usdt: float = 10000
+    initial_sell_px: float = 0.0  # 限价起仓价格
+    adopt_sell_px: float = 0.0    # 基准价（自动往上偏移）
     tg_bot_token: str = ""
     tg_chat_id: str = ""
     api_key: str = ""
@@ -31,6 +33,8 @@ def parse_args() -> Config:
     parser.add_argument("--leverage", type=int, default=3)
     parser.add_argument("--interval", type=int, default=5)
     parser.add_argument("--max-notional", type=float, default=10000)
+    parser.add_argument("--initial-sell-px", type=float, default=0, help="限价起仓价格")
+    parser.add_argument("--adopt-sell-px", type=float, default=0, help="基准价（自动往上偏移）")
 
     args = parser.parse_args()
     return Config(
@@ -41,6 +45,8 @@ def parse_args() -> Config:
         leverage=args.leverage,
         interval=args.interval,
         max_notional_usdt=args.max_notional,
+        initial_sell_px=args.initial_sell_px,
+        adopt_sell_px=args.adopt_sell_px,
         tg_bot_token=os.getenv("TG_BOT_TOKEN", ""),
         tg_chat_id=os.getenv("TG_CHAT_ID", ""),
         api_key=os.getenv("BITGET_API_KEY", ""),
