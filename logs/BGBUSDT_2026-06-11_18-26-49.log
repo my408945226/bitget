@@ -1,0 +1,22 @@
+2026-06-11 18:26:49 [INFO] === 初始化 BGBUSDT [DRY-RUN] ===
+2026-06-11 18:26:50 [WARNING] GET /api/v3/market/instruments 返回异常: code=400172 msg=Parameter verification failed
+2026-06-11 18:26:50 [WARNING] 无法获取合约信息，使用默认参数
+2026-06-11 18:26:50 [INFO] symbolStatus: normal
+2026-06-11 18:26:50 [DEBUG] [DRY-RUN] POST /api/v3/account/set-hold-mode body={"holdMode": "one_way_mode"}
+2026-06-11 18:26:50 [INFO] 持仓模式已设置为: one_way_mode
+2026-06-11 18:26:50 [DEBUG] [DRY-RUN] POST /api/v3/account/set-leverage body={"instId": "BGBUSDT", "leverage": "3"}
+2026-06-11 18:26:50 [INFO] 杠杆已设置为 3x
+2026-06-11 18:26:50 [INFO] size=4.0 验证通过 (dry-run 跳过)
+2026-06-11 18:26:50 [INFO] 起仓: 市价空 4.0 张
+2026-06-11 18:26:50 [DEBUG] [DRY-RUN] POST /api/v3/trade/place-order body={"instId": "BGBUSDT", "symbol": "BGBUSDT", "side": "sell", "orderType": "market", "qty": "4.0", "clientOid": "sp610395DGONWi9z", "posSide": "short"}
+2026-06-11 18:26:50 [INFO] 起仓成功: stack_top=1.760000
+2026-06-11 18:26:50 [INFO] [refresh|startup|r610396] stack_top=1.760000 SELL: desired=1.768800 cur=None needs_refresh=True
+2026-06-11 18:26:50 [DEBUG] [DRY-RUN] POST /api/v3/trade/place-order body={"instId": "BGBUSDT", "symbol": "BGBUSDT", "side": "sell", "orderType": "limit", "price": "1.7688", "qty": "4.0", "timeInForce": "post_only", "clientOid": "spSELL610396KlYQmi6W", "posSide": "short"}
+2026-06-11 18:26:50 [INFO] [r610396] SELL postOnly 已挂 None @ 1.768800
+2026-06-11 18:26:50 [INFO] [refresh|startup|r610396] BUY: depth=1 current=0 cancel=0 place=1
+2026-06-11 18:26:50 [DEBUG] [DRY-RUN] POST /api/v3/trade/place-order body={"instId": "BGBUSDT", "symbol": "BGBUSDT", "side": "buy", "orderType": "limit", "price": "1.7512", "qty": "4.0", "timeInForce": "post_only", "clientOid": "spBUY6103960Ht4Ol6q", "reduceOnly": "yes", "posSide": "short"}
+2026-06-11 18:26:50 [INFO] [r610396] BUY postOnly 已挂 None @ 1.751200
+2026-06-11 18:26:50 [INFO] 启动完成: 模式=DRY-RUN 网格=0.50% stack_top=1.760000 持仓=1 单
+2026-06-11 18:26:50 [INFO] 策略启动: [DRY-RUN] 轮询间隔=5s
+2026-06-11 18:27:03 [INFO] 收到退出信号，保存 state 后退出...
+2026-06-11 18:27:05 [INFO] 策略已安全退出

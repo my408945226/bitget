@@ -1,0 +1,409 @@
+2026-06-11 18:34:02 [INFO] === 初始化 BGBUSDT [LIVE] ===
+2026-06-11 18:34:02 [WARNING] GET /api/v3/market/instruments 返回异常: code=400172 msg=Parameter verification failed
+2026-06-11 18:34:02 [WARNING] 无法获取合约信息，使用默认参数
+2026-06-11 18:34:02 [INFO] symbolStatus: normal
+2026-06-11 18:34:03 [INFO] POST /api/v3/account/set-hold-mode 成功
+2026-06-11 18:34:03 [INFO] 持仓模式已设置为: one_way_mode
+2026-06-11 18:34:03 [INFO] POST /api/v3/account/set-leverage 成功
+2026-06-11 18:34:03 [INFO] 杠杆已设置为 3x
+2026-06-11 18:34:03 [WARNING] 无法获取价格，跳过验证
+2026-06-11 18:34:03 [INFO] 起仓: 市价空 4.0 张
+2026-06-11 18:34:03 [INFO] POST /api/v3/trade/place-order 成功
+2026-06-11 18:34:03 [WARNING] 无法获取成交价，使用状态初始值
+2026-06-11 18:34:03 [WARNING] 使用历史数据初始化 stack_top
+2026-06-11 18:34:03 [INFO] 起仓成功: stack_top=1.000000
+2026-06-11 18:34:03 [INFO] [refresh|startup|r043719] stack_top=1.000000 SELL: desired=1.005000 cur=None needs_refresh=True
+2026-06-11 18:34:04 [WARNING] POST /api/v3/trade/place-order 返回异常: code=25205 msg=BGBUSDT交易价格不能低于5%
+2026-06-11 18:34:04 [WARNING] [r043719] SELL postOnly 被拒: BGBUSDT交易价格不能低于5%
+2026-06-11 18:34:04 [INFO] [r043719_fallback] 市价加仓
+2026-06-11 18:34:04 [INFO] POST /api/v3/trade/place-order 成功
+2026-06-11 18:34:04 [INFO] [r043719_fallback] 市价加仓成功, opens=2
+2026-06-11 18:34:04 [INFO] [refresh|add_r043719_fallback|r044423] stack_top=1.000000 SELL: desired=1.005000 cur=None needs_refresh=True
+2026-06-11 18:34:04 [WARNING] POST /api/v3/trade/place-order 返回异常: code=25205 msg=BGBUSDT交易价格不能低于5%
+2026-06-11 18:34:04 [WARNING] [r044423] SELL postOnly 被拒: BGBUSDT交易价格不能低于5%
+2026-06-11 18:34:04 [INFO] [r044423_fallback] 市价加仓
+2026-06-11 18:34:04 [INFO] POST /api/v3/trade/place-order 成功
+2026-06-11 18:34:04 [INFO] [r044423_fallback] 市价加仓成功, opens=3
+2026-06-11 18:34:04 [INFO] [refresh|add_r044423_fallback|r044950] stack_top=1.000000 SELL: desired=1.005000 cur=None needs_refresh=True
+2026-06-11 18:34:05 [WARNING] POST /api/v3/trade/place-order 返回异常: code=25205 msg=BGBUSDT交易价格不能低于5%
+2026-06-11 18:34:05 [WARNING] [r044950] SELL postOnly 被拒: BGBUSDT交易价格不能低于5%
+2026-06-11 18:34:05 [INFO] [r044950_fallback] 市价加仓
+2026-06-11 18:34:05 [INFO] POST /api/v3/trade/place-order 成功
+2026-06-11 18:34:05 [INFO] [r044950_fallback] 市价加仓成功, opens=4
+2026-06-11 18:34:05 [INFO] [refresh|add_r044950_fallback|r045408] stack_top=1.000000 SELL: desired=1.005000 cur=None needs_refresh=True
+2026-06-11 18:34:05 [WARNING] POST /api/v3/trade/place-order 返回异常: code=25205 msg=BGBUSDT交易价格不能低于5%
+2026-06-11 18:34:05 [WARNING] [r045408] SELL postOnly 被拒: BGBUSDT交易价格不能低于5%
+2026-06-11 18:34:05 [INFO] [r045408_fallback] 市价加仓
+2026-06-11 18:34:06 [INFO] POST /api/v3/trade/place-order 成功
+2026-06-11 18:34:06 [INFO] [r045408_fallback] 市价加仓成功, opens=5
+2026-06-11 18:34:06 [INFO] [refresh|add_r045408_fallback|r046131] stack_top=1.000000 SELL: desired=1.005000 cur=None needs_refresh=True
+2026-06-11 18:34:06 [WARNING] POST /api/v3/trade/place-order 返回异常: code=25205 msg=BGBUSDT交易价格不能低于5%
+2026-06-11 18:34:06 [WARNING] [r046131] SELL postOnly 被拒: BGBUSDT交易价格不能低于5%
+2026-06-11 18:34:06 [INFO] [r046131_fallback] 市价加仓
+2026-06-11 18:34:06 [INFO] POST /api/v3/trade/place-order 成功
+2026-06-11 18:34:06 [INFO] [r046131_fallback] 市价加仓成功, opens=6
+2026-06-11 18:34:06 [INFO] [refresh|add_r046131_fallback|r046569] stack_top=1.000000 SELL: desired=1.005000 cur=None needs_refresh=True
+2026-06-11 18:34:06 [WARNING] POST /api/v3/trade/place-order 返回异常: code=25205 msg=BGBUSDT交易价格不能低于5%
+2026-06-11 18:34:06 [WARNING] [r046569] SELL postOnly 被拒: BGBUSDT交易价格不能低于5%
+2026-06-11 18:34:06 [INFO] [r046569_fallback] 市价加仓
+2026-06-11 18:34:07 [INFO] POST /api/v3/trade/place-order 成功
+2026-06-11 18:34:07 [INFO] [r046569_fallback] 市价加仓成功, opens=7
+2026-06-11 18:34:07 [INFO] [refresh|add_r046569_fallback|r047004] stack_top=1.000000 SELL: desired=1.005000 cur=None needs_refresh=True
+2026-06-11 18:34:07 [WARNING] POST /api/v3/trade/place-order 返回异常: code=25205 msg=BGBUSDT交易价格不能低于5%
+2026-06-11 18:34:07 [WARNING] [r047004] SELL postOnly 被拒: BGBUSDT交易价格不能低于5%
+2026-06-11 18:34:07 [INFO] [r047004_fallback] 市价加仓
+2026-06-11 18:34:07 [INFO] POST /api/v3/trade/place-order 成功
+2026-06-11 18:34:07 [INFO] [r047004_fallback] 市价加仓成功, opens=8
+2026-06-11 18:34:07 [INFO] [refresh|add_r047004_fallback|r047471] stack_top=1.000000 SELL: desired=1.005000 cur=None needs_refresh=True
+2026-06-11 18:34:07 [WARNING] POST /api/v3/trade/place-order 返回异常: code=25205 msg=BGBUSDT交易价格不能低于5%
+2026-06-11 18:34:07 [WARNING] [r047471] SELL postOnly 被拒: BGBUSDT交易价格不能低于5%
+2026-06-11 18:34:07 [INFO] [r047471_fallback] 市价加仓
+2026-06-11 18:34:07 [INFO] POST /api/v3/trade/place-order 成功
+2026-06-11 18:34:07 [INFO] [r047471_fallback] 市价加仓成功, opens=9
+2026-06-11 18:34:07 [INFO] [refresh|add_r047471_fallback|r047906] stack_top=1.000000 SELL: desired=1.005000 cur=None needs_refresh=True
+2026-06-11 18:34:08 [WARNING] POST /api/v3/trade/place-order 返回异常: code=25205 msg=BGBUSDT交易价格不能低于5%
+2026-06-11 18:34:08 [WARNING] [r047906] SELL postOnly 被拒: BGBUSDT交易价格不能低于5%
+2026-06-11 18:34:08 [INFO] [r047906_fallback] 市价加仓
+2026-06-11 18:34:08 [INFO] POST /api/v3/trade/place-order 成功
+2026-06-11 18:34:08 [INFO] [r047906_fallback] 市价加仓成功, opens=10
+2026-06-11 18:34:08 [INFO] [refresh|add_r047906_fallback|r048343] stack_top=1.000000 SELL: desired=1.005000 cur=None needs_refresh=True
+2026-06-11 18:34:08 [WARNING] POST /api/v3/trade/place-order 返回异常: code=25205 msg=BGBUSDT交易价格不能低于5%
+2026-06-11 18:34:08 [WARNING] [r048343] SELL postOnly 被拒: BGBUSDT交易价格不能低于5%
+2026-06-11 18:34:08 [INFO] [r048343_fallback] 市价加仓
+2026-06-11 18:34:08 [INFO] POST /api/v3/trade/place-order 成功
+2026-06-11 18:34:08 [INFO] [r048343_fallback] 市价加仓成功, opens=11
+2026-06-11 18:34:08 [INFO] [refresh|add_r048343_fallback|r048788] stack_top=1.000000 SELL: desired=1.005000 cur=None needs_refresh=True
+2026-06-11 18:34:09 [WARNING] POST /api/v3/trade/place-order 返回异常: code=25205 msg=BGBUSDT交易价格不能低于5%
+2026-06-11 18:34:09 [WARNING] [r048788] SELL postOnly 被拒: BGBUSDT交易价格不能低于5%
+2026-06-11 18:34:09 [INFO] [r048788_fallback] 市价加仓
+2026-06-11 18:34:09 [INFO] POST /api/v3/trade/place-order 成功
+2026-06-11 18:34:09 [INFO] [r048788_fallback] 市价加仓成功, opens=12
+2026-06-11 18:34:09 [INFO] [refresh|add_r048788_fallback|r049233] stack_top=1.000000 SELL: desired=1.005000 cur=None needs_refresh=True
+2026-06-11 18:34:09 [WARNING] POST /api/v3/trade/place-order 返回异常: code=25205 msg=BGBUSDT交易价格不能低于5%
+2026-06-11 18:34:09 [WARNING] [r049233] SELL postOnly 被拒: BGBUSDT交易价格不能低于5%
+2026-06-11 18:34:09 [INFO] [r049233_fallback] 市价加仓
+2026-06-11 18:34:10 [INFO] POST /api/v3/trade/place-order 成功
+2026-06-11 18:34:10 [INFO] [r049233_fallback] 市价加仓成功, opens=13
+2026-06-11 18:34:10 [INFO] [refresh|add_r049233_fallback|r050231] stack_top=1.000000 SELL: desired=1.005000 cur=None needs_refresh=True
+2026-06-11 18:34:10 [WARNING] POST /api/v3/trade/place-order 返回异常: code=25205 msg=BGBUSDT交易价格不能低于5%
+2026-06-11 18:34:10 [WARNING] [r050231] SELL postOnly 被拒: BGBUSDT交易价格不能低于5%
+2026-06-11 18:34:10 [INFO] [r050231_fallback] 市价加仓
+2026-06-11 18:34:10 [INFO] POST /api/v3/trade/place-order 成功
+2026-06-11 18:34:10 [INFO] [r050231_fallback] 市价加仓成功, opens=14
+2026-06-11 18:34:10 [INFO] [refresh|add_r050231_fallback|r050665] stack_top=1.000000 SELL: desired=1.005000 cur=None needs_refresh=True
+2026-06-11 18:34:10 [WARNING] POST /api/v3/trade/place-order 返回异常: code=25205 msg=BGBUSDT交易价格不能低于5%
+2026-06-11 18:34:10 [WARNING] [r050665] SELL postOnly 被拒: BGBUSDT交易价格不能低于5%
+2026-06-11 18:34:10 [INFO] [r050665_fallback] 市价加仓
+2026-06-11 18:34:11 [INFO] POST /api/v3/trade/place-order 成功
+2026-06-11 18:34:11 [INFO] [r050665_fallback] 市价加仓成功, opens=15
+2026-06-11 18:34:11 [INFO] [refresh|add_r050665_fallback|r051111] stack_top=1.000000 SELL: desired=1.005000 cur=None needs_refresh=True
+2026-06-11 18:34:11 [WARNING] POST /api/v3/trade/place-order 返回异常: code=25205 msg=BGBUSDT交易价格不能低于5%
+2026-06-11 18:34:11 [WARNING] [r051111] SELL postOnly 被拒: BGBUSDT交易价格不能低于5%
+2026-06-11 18:34:11 [INFO] [r051111_fallback] 市价加仓
+2026-06-11 18:34:11 [INFO] POST /api/v3/trade/place-order 成功
+2026-06-11 18:34:11 [INFO] [r051111_fallback] 市价加仓成功, opens=16
+2026-06-11 18:34:11 [INFO] [refresh|add_r051111_fallback|r051545] stack_top=1.000000 SELL: desired=1.005000 cur=None needs_refresh=True
+2026-06-11 18:34:11 [WARNING] POST /api/v3/trade/place-order 返回异常: code=25205 msg=BGBUSDT交易价格不能低于5%
+2026-06-11 18:34:11 [WARNING] [r051545] SELL postOnly 被拒: BGBUSDT交易价格不能低于5%
+2026-06-11 18:34:11 [INFO] [r051545_fallback] 市价加仓
+2026-06-11 18:34:11 [INFO] POST /api/v3/trade/place-order 成功
+2026-06-11 18:34:11 [INFO] [r051545_fallback] 市价加仓成功, opens=17
+2026-06-11 18:34:11 [INFO] [refresh|add_r051545_fallback|r051998] stack_top=1.000000 SELL: desired=1.005000 cur=None needs_refresh=True
+2026-06-11 18:34:12 [WARNING] POST /api/v3/trade/place-order 返回异常: code=25205 msg=BGBUSDT交易价格不能低于5%
+2026-06-11 18:34:12 [WARNING] [r051998] SELL postOnly 被拒: BGBUSDT交易价格不能低于5%
+2026-06-11 18:34:12 [INFO] [r051998_fallback] 市价加仓
+2026-06-11 18:34:12 [INFO] POST /api/v3/trade/place-order 成功
+2026-06-11 18:34:12 [INFO] [r051998_fallback] 市价加仓成功, opens=18
+2026-06-11 18:34:12 [INFO] [refresh|add_r051998_fallback|r052442] stack_top=1.000000 SELL: desired=1.005000 cur=None needs_refresh=True
+2026-06-11 18:34:12 [WARNING] POST /api/v3/trade/place-order 返回异常: code=25205 msg=BGBUSDT交易价格不能低于5%
+2026-06-11 18:34:12 [WARNING] [r052442] SELL postOnly 被拒: BGBUSDT交易价格不能低于5%
+2026-06-11 18:34:12 [INFO] [r052442_fallback] 市价加仓
+2026-06-11 18:34:12 [INFO] POST /api/v3/trade/place-order 成功
+2026-06-11 18:34:12 [INFO] [r052442_fallback] 市价加仓成功, opens=19
+2026-06-11 18:34:12 [INFO] [refresh|add_r052442_fallback|r052875] stack_top=1.000000 SELL: desired=1.005000 cur=None needs_refresh=True
+2026-06-11 18:34:13 [WARNING] POST /api/v3/trade/place-order 返回异常: code=25205 msg=BGBUSDT交易价格不能低于5%
+2026-06-11 18:34:13 [WARNING] [r052875] SELL postOnly 被拒: BGBUSDT交易价格不能低于5%
+2026-06-11 18:34:13 [INFO] [r052875_fallback] 市价加仓
+2026-06-11 18:34:13 [INFO] POST /api/v3/trade/place-order 成功
+2026-06-11 18:34:13 [INFO] [r052875_fallback] 市价加仓成功, opens=20
+2026-06-11 18:34:13 [INFO] [refresh|add_r052875_fallback|r053566] stack_top=1.000000 SELL: desired=1.005000 cur=None needs_refresh=True
+2026-06-11 18:34:13 [WARNING] POST /api/v3/trade/place-order 返回异常: code=25205 msg=BGBUSDT交易价格不能低于5%
+2026-06-11 18:34:13 [WARNING] [r053566] SELL postOnly 被拒: BGBUSDT交易价格不能低于5%
+2026-06-11 18:34:13 [INFO] [r053566_fallback] 市价加仓
+2026-06-11 18:34:13 [INFO] POST /api/v3/trade/place-order 成功
+2026-06-11 18:34:13 [INFO] [r053566_fallback] 市价加仓成功, opens=21
+2026-06-11 18:34:13 [INFO] [refresh|add_r053566_fallback|r053998] stack_top=1.000000 SELL: desired=1.005000 cur=None needs_refresh=True
+2026-06-11 18:34:14 [WARNING] POST /api/v3/trade/place-order 返回异常: code=25205 msg=BGBUSDT交易价格不能低于5%
+2026-06-11 18:34:14 [WARNING] [r053998] SELL postOnly 被拒: BGBUSDT交易价格不能低于5%
+2026-06-11 18:34:14 [INFO] [r053998_fallback] 市价加仓
+2026-06-11 18:34:14 [INFO] POST /api/v3/trade/place-order 成功
+2026-06-11 18:34:14 [INFO] [r053998_fallback] 市价加仓成功, opens=22
+2026-06-11 18:34:14 [INFO] [refresh|add_r053998_fallback|r054501] stack_top=1.000000 SELL: desired=1.005000 cur=None needs_refresh=True
+2026-06-11 18:34:14 [WARNING] POST /api/v3/trade/place-order 返回异常: code=25205 msg=BGBUSDT交易价格不能低于5%
+2026-06-11 18:34:14 [WARNING] [r054501] SELL postOnly 被拒: BGBUSDT交易价格不能低于5%
+2026-06-11 18:34:14 [INFO] [r054501_fallback] 市价加仓
+2026-06-11 18:34:14 [WARNING] POST /api/v3/trade/place-order 返回异常: code=25203 msg=保证金不足
+2026-06-11 18:34:14 [INFO] [refresh|add_r053998_fallback|r054501] BUY: depth=22 current=0 cancel=0 place=22
+2026-06-11 18:34:15 [INFO] POST /api/v3/trade/place-order 成功
+2026-06-11 18:34:15 [INFO] [r054501] BUY postOnly 已挂 None @ 0.995000
+2026-06-11 18:34:15 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:15 [WARNING] [r054501] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:15 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:15 [WARNING] [r054501] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:16 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:16 [WARNING] [r054501] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:16 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:16 [WARNING] [r054501] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:16 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:16 [WARNING] [r054501] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:17 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:17 [WARNING] [r054501] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:17 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:17 [WARNING] [r054501] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:17 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:17 [WARNING] [r054501] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:17 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:17 [WARNING] [r054501] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:18 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:18 [WARNING] [r054501] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:18 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:18 [WARNING] [r054501] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:18 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:18 [WARNING] [r054501] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:18 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:18 [WARNING] [r054501] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:19 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:19 [WARNING] [r054501] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:19 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:19 [WARNING] [r054501] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:19 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:19 [WARNING] [r054501] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:19 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:19 [WARNING] [r054501] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:19 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:19 [WARNING] [r054501] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:20 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:20 [WARNING] [r054501] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:20 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:20 [WARNING] [r054501] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:20 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:20 [WARNING] [r054501] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:20 [INFO] [refresh|add_r053566_fallback|r053998] BUY: depth=21 current=1 cancel=0 place=20
+2026-06-11 18:34:20 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:20 [WARNING] [r053998] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:21 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:21 [WARNING] [r053998] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:21 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:21 [WARNING] [r053998] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:21 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:21 [WARNING] [r053998] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:21 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:21 [WARNING] [r053998] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:22 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:22 [WARNING] [r053998] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:22 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:22 [WARNING] [r053998] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:22 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:22 [WARNING] [r053998] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:23 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:23 [WARNING] [r053998] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:23 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:23 [WARNING] [r053998] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:23 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:23 [WARNING] [r053998] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:23 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:23 [WARNING] [r053998] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:23 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:23 [WARNING] [r053998] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:24 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:24 [WARNING] [r053998] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:24 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:24 [WARNING] [r053998] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:24 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:24 [WARNING] [r053998] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:24 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:24 [WARNING] [r053998] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:25 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:25 [WARNING] [r053998] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:25 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:25 [WARNING] [r053998] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:25 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:25 [WARNING] [r053998] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:25 [INFO] [refresh|add_r052875_fallback|r053566] BUY: depth=20 current=1 cancel=0 place=19
+2026-06-11 18:34:25 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:25 [WARNING] [r053566] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:25 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:25 [WARNING] [r053566] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:26 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:26 [WARNING] [r053566] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:26 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:26 [WARNING] [r053566] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:26 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:26 [WARNING] [r053566] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:27 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:27 [WARNING] [r053566] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:27 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:27 [WARNING] [r053566] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:27 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:27 [WARNING] [r053566] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:27 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:27 [WARNING] [r053566] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:27 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:27 [WARNING] [r053566] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:28 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:28 [WARNING] [r053566] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:28 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:28 [WARNING] [r053566] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:28 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:28 [WARNING] [r053566] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:28 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:28 [WARNING] [r053566] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:29 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:29 [WARNING] [r053566] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:29 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:29 [WARNING] [r053566] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:29 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:29 [WARNING] [r053566] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:29 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:29 [WARNING] [r053566] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:30 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:30 [WARNING] [r053566] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:30 [INFO] [refresh|add_r052442_fallback|r052875] BUY: depth=19 current=1 cancel=0 place=18
+2026-06-11 18:34:30 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:30 [WARNING] [r052875] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:30 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:30 [WARNING] [r052875] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:30 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:30 [WARNING] [r052875] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:31 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:31 [WARNING] [r052875] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:31 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:31 [WARNING] [r052875] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:31 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:31 [WARNING] [r052875] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:31 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:31 [WARNING] [r052875] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:31 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:31 [WARNING] [r052875] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:32 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:32 [WARNING] [r052875] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:32 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:32 [WARNING] [r052875] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:32 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:32 [WARNING] [r052875] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:33 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:33 [WARNING] [r052875] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:33 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:33 [WARNING] [r052875] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:33 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:33 [WARNING] [r052875] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:33 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:33 [WARNING] [r052875] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:34 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:34 [WARNING] [r052875] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:34 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:34 [WARNING] [r052875] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:34 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:34 [WARNING] [r052875] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:34 [INFO] [refresh|add_r051998_fallback|r052442] BUY: depth=18 current=1 cancel=0 place=17
+2026-06-11 18:34:34 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:34 [WARNING] [r052442] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:35 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:35 [WARNING] [r052442] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:35 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:35 [WARNING] [r052442] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:35 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:35 [WARNING] [r052442] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:35 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:35 [WARNING] [r052442] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:35 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:35 [WARNING] [r052442] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:36 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:36 [WARNING] [r052442] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:36 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:36 [WARNING] [r052442] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:36 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:36 [WARNING] [r052442] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:37 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:37 [WARNING] [r052442] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:37 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:37 [WARNING] [r052442] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:37 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:37 [WARNING] [r052442] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:37 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:37 [WARNING] [r052442] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:37 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:37 [WARNING] [r052442] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:38 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:38 [WARNING] [r052442] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:38 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:38 [WARNING] [r052442] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:38 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:38 [WARNING] [r052442] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:38 [INFO] [refresh|add_r051545_fallback|r051998] BUY: depth=17 current=1 cancel=0 place=16
+2026-06-11 18:34:38 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:38 [WARNING] [r051998] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:39 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:39 [WARNING] [r051998] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:39 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:39 [WARNING] [r051998] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:39 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:39 [WARNING] [r051998] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:39 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:39 [WARNING] [r051998] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:40 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:40 [WARNING] [r051998] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:40 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:40 [WARNING] [r051998] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:40 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:40 [WARNING] [r051998] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:40 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:40 [WARNING] [r051998] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:41 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:41 [WARNING] [r051998] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:41 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:41 [WARNING] [r051998] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:41 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:41 [WARNING] [r051998] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:42 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:42 [WARNING] [r051998] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:42 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:42 [WARNING] [r051998] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:42 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:42 [WARNING] [r051998] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:42 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:42 [WARNING] [r051998] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:42 [INFO] [refresh|add_r051111_fallback|r051545] BUY: depth=16 current=1 cancel=0 place=15
+2026-06-11 18:34:43 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:43 [WARNING] [r051545] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:43 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:43 [WARNING] [r051545] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:43 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:43 [WARNING] [r051545] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:43 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:43 [WARNING] [r051545] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:44 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:44 [WARNING] [r051545] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:44 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:44 [WARNING] [r051545] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:44 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:44 [WARNING] [r051545] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:44 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:44 [WARNING] [r051545] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:45 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:45 [WARNING] [r051545] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:45 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:45 [WARNING] [r051545] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:45 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:45 [WARNING] [r051545] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:45 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:45 [WARNING] [r051545] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:45 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:45 [WARNING] [r051545] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:46 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:46 [WARNING] [r051545] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:46 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:46 [WARNING] [r051545] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:46 [INFO] [refresh|add_r050665_fallback|r051111] BUY: depth=15 current=1 cancel=0 place=14
+2026-06-11 18:34:46 [WARNING] POST /api/v3/trade/place-order 返回异常: code=45115 msg=price 应该满足 0.0001{1} 倍数
+2026-06-11 18:34:46 [WARNING] [r051111] BUY postOnly 被拒: price 应该满足 0.0001{1} 倍数

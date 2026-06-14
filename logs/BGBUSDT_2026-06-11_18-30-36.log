@@ -1,0 +1,13 @@
+2026-06-11 18:30:36 [INFO] === 初始化 BGBUSDT [LIVE] ===
+2026-06-11 18:30:38 [WARNING] GET /api/v3/market/instruments 返回异常: code=400172 msg=Parameter verification failed
+2026-06-11 18:30:38 [WARNING] 无法获取合约信息，使用默认参数
+2026-06-11 18:30:38 [INFO] symbolStatus: normal
+2026-06-11 18:30:38 [INFO] POST /api/v3/account/set-hold-mode 成功
+2026-06-11 18:30:38 [INFO] 持仓模式已设置为: one_way_mode
+2026-06-11 18:30:38 [WARNING] POST /api/v3/account/set-leverage 返回异常: code=40034 msg=参数 null 不存在
+2026-06-11 18:30:38 [WARNING] GET /api/v3/market/tickers 返回异常: code=400172 msg=Parameter verification failed
+2026-06-11 18:30:38 [WARNING] 无法获取价格，跳过验证
+2026-06-11 18:30:38 [INFO] 起仓: 市价空 4.0 张
+2026-06-11 18:30:39 [INFO] POST /api/v3/trade/place-order 成功
+2026-06-11 18:30:39 [WARNING] GET /api/v3/market/tickers 返回异常: code=400172 msg=Parameter verification failed
+2026-06-11 18:30:39 [ERROR] 起仓后无法获取成交价

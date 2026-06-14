@@ -1,0 +1,22 @@
+2026-06-11 18:27:18 [INFO] === 初始化 BGBUSDT [LIVE] ===
+2026-06-11 18:27:18 [WARNING] GET /api/v3/market/instruments 返回异常: code=400172 msg=Parameter verification failed
+2026-06-11 18:27:18 [WARNING] 无法获取合约信息，使用默认参数
+2026-06-11 18:27:18 [INFO] symbolStatus: normal
+2026-06-11 18:27:18 [INFO] POST /api/v3/account/set-hold-mode 成功
+2026-06-11 18:27:18 [INFO] 持仓模式已设置为: one_way_mode
+2026-06-11 18:27:18 [WARNING] POST /api/v3/account/set-leverage 返回异常: code=40034 msg=参数 null 不存在
+2026-06-11 18:27:19 [WARNING] GET /api/v3/market/tickers 返回异常: code=400172 msg=Parameter verification failed
+2026-06-11 18:27:19 [WARNING] 无法获取价格，跳过验证
+2026-06-11 18:27:19 [INFO] [refresh|startup|r639083] stack_top=1.760000 SELL: desired=1.768800 cur=1.7688 needs_refresh=True
+2026-06-11 18:27:19 [WARNING] POST /api/v3/trade/place-order 返回异常: code=40019 msg=参数 category 不能为空
+2026-06-11 18:27:19 [WARNING] [r639083] SELL postOnly 被拒: 参数 category 不能为空
+2026-06-11 18:27:19 [INFO] [r639083_fallback] 市价加仓
+2026-06-11 18:27:19 [WARNING] POST /api/v3/trade/place-order 返回异常: code=40019 msg=参数 category 不能为空
+2026-06-11 18:27:19 [INFO] [refresh|startup|r639083] BUY: depth=1 current=1 cancel=0 place=0
+2026-06-11 18:27:19 [INFO] 启动完成: 模式=LIVE 网格=0.50% stack_top=1.760000 持仓=1 单
+2026-06-11 18:27:19 [INFO] 策略启动: [LIVE] 轮询间隔=5s
+2026-06-11 18:27:19 [WARNING] GET /api/v3/market/tickers 返回异常: code=400172 msg=Parameter verification failed
+2026-06-11 18:27:24 [WARNING] GET /api/v3/market/tickers 返回异常: code=400172 msg=Parameter verification failed
+2026-06-11 18:27:29 [WARNING] GET /api/v3/market/tickers 返回异常: code=400172 msg=Parameter verification failed
+2026-06-11 18:27:33 [INFO] 收到退出信号，保存 state 后退出...
+2026-06-11 18:27:34 [INFO] 策略已安全退出

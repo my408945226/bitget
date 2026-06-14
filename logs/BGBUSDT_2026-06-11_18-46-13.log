@@ -1,0 +1,11 @@
+2026-06-11 18:46:13 [INFO] === 初始化 BGBUSDT [LIVE] ===
+2026-06-11 18:46:15 [INFO] symbolStatus: normal
+2026-06-11 18:46:16 [INFO] POST /api/v3/account/set-hold-mode 成功
+2026-06-11 18:46:16 [INFO] 持仓模式已设置为: one_way_mode
+2026-06-11 18:46:16 [INFO] POST /api/v3/account/set-leverage 成功
+2026-06-11 18:46:16 [INFO] 杠杆已设置为 3x
+2026-06-11 18:46:16 [INFO] size=4.0 验证通过
+2026-06-11 18:46:16 [INFO] [refresh|startup|r776552] stack_top=1.769139 SELL: desired=1.777900 cur=1.7779 needs_refresh=False
+2026-06-11 18:46:16 [INFO] [refresh|startup|r776552] BUY: depth=28 current=28 cancel=0 place=0
+2026-06-11 18:46:16 [INFO] 启动完成: 模式=LIVE 网格=0.50% stack_top=1.769139 持仓=28 单
+2026-06-11 18:46:16 [INFO] 策略启动: [LIVE] 轮询间隔=5s
