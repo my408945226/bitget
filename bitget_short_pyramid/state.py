@@ -31,35 +31,17 @@ except ImportError:
 
 
 class State(dict):
-    """状态字典（可序列化）"""
-
+    """状态字典"""
     def __init__(self, symbol: str):
         super().__init__()
         self["symbol"] = symbol
-        # 核心栈字段
-        self["stack_top"] = 0.0  # 栈顶入场价
-        self["opens"] = 0  # 累计开仓次数
-        self["closes"] = 0  # 累计平仓次数
-        self["total_realized_pnl"] = 0.0  # 累计已实现盈亏
-        # Maker 模式挂单追踪
+        self["stack_top"] = 0.0
+        self["opens"] = 0
+        self["closes"] = 0
         self["pending_sell_ord_id"] = None
         self["pending_sell_px"] = None
-        self["pending_buys"] = {}  # {ord_id: {entry_px, target_px}}
-        # 时间戳
-        self["last_action_time"] = 0.0  # 最后一次动作时间
-        self["last_refresh_ts"] = 0.0  # 最后一次 refresh 时间
-        self["last_reconcile_ts"] = 0.0  # 最后一次对账时间
-        # 运行状态
-        self["paused"] = False
-        self["pause_reason"] = ""
-        # 起仓限价模式字段
-        self["initial_sell_ord_id"] = None
-        self["initial_sell_px"] = None
-        # 接管字段
-        self["override_sell_px"] = None
-        # 创建/修改时间
-        self["created_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
-        self["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+        self["pending_buys"] = {}
+        self["last_action_time"] = 0.0
 
 
 def state_path(symbol: str) -> Path:
@@ -84,23 +66,16 @@ def load_state(symbol: str) -> State:
 
 
 def save_state(state: State) -> None:
-    """保存状态到 PKL 文件（P2: 加文件锁保护，防止多进程覆盖）"""
-    state["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+    """保存状态（带文件锁）"""
     path = state_path(state["symbol"])
     with open(path, "wb") as f:
-        # P2: 跨平台文件锁
         if HAS_FCNTL:
-            # Linux/Mac
             fcntl.flock(f.fileno(), fcntl.LOCK_EX)
         elif HAS_MSVCRT:
-            # Windows
             msvcrt.locking(f.fileno(), msvcrt.LK_LOCK, 1)
-
         pickle.dump(dict(state), f)
         f.flush()
-        os.fsync(f.fileno())  # 确保写入磁盘
-
-        # 释放锁
+        os.fsync(f.fileno())
         if HAS_FCNTL:
             fcntl.flock(f.fileno(), fcntl.LOCK_UN)
         elif HAS_MSVCRT:

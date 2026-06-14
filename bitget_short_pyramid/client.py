@@ -18,7 +18,6 @@ import logging
 import string
 import random
 from urllib.parse import urlencode
-from typing import Optional, Dict, Any
 
 import requests
 
@@ -179,19 +178,8 @@ class BitgetClient:
 
     def place_order(self, inst_id: str, side: str, sz: float, px: float,
                     order_type: str = "market", reduce_only: bool = False,
-                    cl_ord_id: Optional[str] = None) -> Dict[str, Any]:
-        """
-        POST /api/v3/trade/place-order - 下单（市价或限价）
-
-        :param inst_id: 合约ID / symbol (e.g. "BGBUSDT")
-        :param side: "buy" 或 "sell"
-        :param sz: 数量
-        :param px: 限价价格 (market 时可忽略)
-        :param order_type: "market" 或 "limit"
-        :param reduce_only: 平仓标记 (yes/no)
-        :param cl_ord_id: 客户端订单ID (可选，自动生成)
-        :return: {"code": "00000", "data": {"orderId": "xxx", ...}} 或错误
-        """
+                    cl_ord_id: str = None) -> dict:
+        """下单"""
         if not cl_ord_id:
             cl_ord_id = _gen_cl_ord_id("sp")
 
@@ -211,89 +199,35 @@ class BitgetClient:
 
         return self._post("/api/v3/trade/place-order", body)
 
-    def place_post_only(self, inst_id: str, side: str, sz: float, px: float,
-                        reduce_only: bool = False,
-                        cl_ord_id: Optional[str] = None) -> Dict[str, Any]:
-        """
-        POST /api/v3/trade/place-order (postOnly) - 挂限价单
-
-        :param inst_id: 合约ID (e.g. "BGBUSDT")
-        :param side: "buy" 或 "sell"
-        :param sz: 数量
-        :param px: 限价
-        :param reduce_only: 平仓标记
-        :param cl_ord_id: 客户端订单ID
-        :return: {"code": "00000", "data": {"orderId": "xxx", ...}} 或错误
-        """
-        if not cl_ord_id:
-            cl_ord_id = _gen_cl_ord_id("sp")
-
-        body = {
-            "symbol": inst_id,
-            "category": "USDT-FUTURES",
-            "tdMode": "cross",
-            "side": side,
-            "orderType": "limit",
-            "price": str(px),
-            "qty": str(sz),
-            "timeInForce": "post_only",
-            "clientOid": cl_ord_id,
-        }
-        if reduce_only:
-            body["reduceOnly"] = "yes"
-
-        return self._post("/api/v3/trade/place-order", body)
-
-    def cancel_order(self, inst_id: str, ord_id: str) -> Dict[str, Any]:
-        """POST /api/v3/trade/cancel-order - 撤单"""
-        body = {
+    def cancel_order(self, inst_id: str, ord_id: str) -> dict:
+        """撤单"""
+        return self._post("/api/v3/trade/cancel-order", {
             "symbol": inst_id,
             "category": "USDT-FUTURES",
             "orderId": ord_id,
-        }
-        return self._post("/api/v3/trade/cancel-order", body)
+        })
 
     def get_open_orders(self, inst_id: str) -> list:
-        """GET /api/v3/trade/unfilled-orders - 查询当前挂单"""
-        path = "/api/v3/trade/unfilled-orders"
-        params = {"category": "USDT-FUTURES", "symbol": inst_id}
-        resp = self._get(path, params, private=True)
-        if resp.get("code") != "00000":
-            return []
-        data = resp.get("data") or {}
-        return data.get("list") or []
+        """查挂单"""
+        resp = self._get("/api/v3/trade/unfilled-orders", {"category": "USDT-FUTURES", "symbol": inst_id}, private=True)
+        return (resp.get("data") or {}).get("list") or [] if resp.get("code") == "00000" else []
 
     def get_order_info(self, inst_id: str, ord_id: str) -> dict:
-        """GET /api/v3/trade/order-info - 查询订单详情
+        """查订单"""
+        resp = self._get("/api/v3/trade/order-info", {"category": "USDT-FUTURES", "symbol": inst_id, "orderId": ord_id}, private=True)
+        return resp.get("data") or {} if resp.get("code") == "00000" else {}
 
-        orderStatus: new / partially_filled / filled / cancelled
-        """
-        path = "/api/v3/trade/order-info"
-        params = {"category": "USDT-FUTURES", "symbol": inst_id, "orderId": ord_id}
-        resp = self._get(path, params, private=True)
-        if resp.get("code") != "00000":
-            return {}
-        return resp.get("data") or {}
-
-    def cancel(self, inst_id: str, ord_id: str) -> Dict[str, Any]:
-        """撤单（别名，兼容 OKX 框架）"""
+    def cancel(self, inst_id: str, ord_id: str) -> dict:
+        """撤单别名"""
         return self.cancel_order(inst_id, ord_id)
 
-    def set_leverage(self, inst_id: str, leverage: int) -> Dict[str, Any]:
-        """POST /api/v3/account/set-leverage - 设杠杆"""
-        body = {
-            "symbol": inst_id,
-            "category": "USDT-FUTURES",
-            "leverage": str(leverage),
-        }
-        return self._post("/api/v3/account/set-leverage", body)
+    def set_leverage(self, inst_id: str, leverage: int) -> dict:
+        """设杠杆"""
+        return self._post("/api/v3/account/set-leverage", {"symbol": inst_id, "category": "USDT-FUTURES", "leverage": str(leverage)})
 
-    def set_hold_mode(self, hold_mode: str) -> Dict[str, Any]:
-        """POST /api/v3/account/set-hold-mode - 设持仓模式"""
-        body = {
-            "holdMode": hold_mode,  # "one_way_mode" 或 "hedge_mode"
-        }
-        return self._post("/api/v3/account/set-hold-mode", body)
+    def set_hold_mode(self, hold_mode: str) -> dict:
+        """设持仓模式"""
+        return self._post("/api/v3/account/set-hold-mode", {"holdMode": hold_mode})
 
     # ====== 内部方法 ======
 

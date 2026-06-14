@@ -1,19 +1,14 @@
-"""栈式金字塔做空策略 (Short Pyramid)
+"""栈式金字塔做空策略 - 简化版
 
-策略逻辑：
-  - 启动 → 市价空 1 张，stack_top = 入场价
-  - 1 个 SELL (加空) @ stack_top × (1+grid)
-  - N 个 BUY (平空) @ stack_top × (1-grid)^i
-  - SELL 成交 → stack_top 更新 → 重挂网格
-  - BUY 成交 → closes += 1 → 重挂网格
-  - 定时对账：30s 检查一次本地 vs 交易所持仓
+核心逻辑:
+  - 市价起仓 → 挂 SELL@stack_top×(1+grid) + BUY梯队@stack_top×(1-grid)^i
+  - SELL成交 → stack_top上移 → 重挂网格
+  - BUY成交 → closes++ → 重挂网格
 """
 import sys
 import time
 import signal
-import logging
 import threading
-from typing import Dict, Any
 
 from .config import parse_args, Config
 from .client import BitgetClient, _gen_cl_ord_id
@@ -28,502 +23,316 @@ class Strategy:
         self.cfg = cfg
         self.log = setup_logger(cfg.symbol)
         self.dry_run = cfg.mode == "dry-run"
-        self.client = BitgetClient(
-            cfg.api_key, cfg.secret_key, cfg.passphrase,
-            self.log, dry_run=self.dry_run,
-        )
+        self.client = BitgetClient(cfg.api_key, cfg.secret_key, cfg.passphrase, self.log, dry_run=self.dry_run)
         self.state: State = load_state(cfg.symbol)
-
-        # 策略参数
         self.GRID_PCT = cfg.grid_pct
         self.POSITION_SZ = cfg.size
         self.MAX_BUYS = 60
-        self.RECONCILE_INTERVAL = 30  # 定时对账间隔（秒）
-
-        # 合约信息
+        self.RECONCILE_SEC = 30  # 对账间隔
         self.contract_info: dict = {}
-
-        # 时间戳追踪
         self.last_reconcile_ts = 0.0
-
-        # 线程锁
         self._lock = threading.RLock()
         self._running = True
-
         signal.signal(signal.SIGINT, self._handle_exit)
 
     def _handle_exit(self, sig, frame):
-        self.log.info("收到退出信号，保存 state 后退出...")
-        self._notify("🛑 策略停止", "收到退出信号，正常退出", "WARNING")
+        self.log.info("退出")
         self._running = False
 
-    def _notify(self, event: str, details: str, level: str = "INFO"):
-        """输出通知到日志和 Telegram"""
-        msg = f"{event} | {details}"
-        getattr(self.log, level.lower(), self.log.info)(msg)
-
-        # Telegram 通知
+    def _notify(self, msg: str):
+        """通知"""
+        self.log.info(msg)
         if not self.dry_run and self.cfg.tg_bot_token:
-            tg_msg = f"<b>{self.cfg.symbol}</b>\n{event}\n{details}"
-            send_telegram(tg_msg, self.cfg.tg_bot_token, self.cfg.tg_chat_id, self.log)
-
-    # ====== 初始化 ======
+            send_telegram(f"<b>{self.cfg.symbol}</b>\n{msg}", self.cfg.tg_bot_token, self.cfg.tg_chat_id)
 
     def init(self):
-        """初始化策略 - 阶段化流程"""
-        mode = "DRY-RUN" if self.dry_run else "LIVE"
-        self.log.info(f"=== 初始化 {self.cfg.symbol} [{mode}] ===")
+        """初始化"""
+        mode = "DRY" if self.dry_run else "LIVE"
+        self.log.info(f"=== {self.cfg.symbol} [{mode}] ===")
 
-        # 阶段 1: 获取合约信息
+        # 获取合约信息
         self.contract_info = self.client.get_contracts(self.cfg.symbol) or {}
         if not self.contract_info:
-            self.contract_info = {
-                "symbolStatus": "normal",
-                "sizeMultiplier": 1,
-                "volumePlace": 0,
-                "minTradeNum": 1,
-                "minTradeUSDT": 10,
-            }
+            self.contract_info = {"symbolStatus": "normal", "sizeMultiplier": 1, "volumePlace": 0, "minTradeNum": 1, "minTradeUSDT": 10, "pricePlace": 4}
 
-        # 阶段 2: 账户配置
+        # 设置账户
         if not self.dry_run:
             try:
                 self.client.set_hold_mode("one_way_mode")
                 self.client.set_leverage(self.cfg.symbol, self.cfg.leverage)
-            except Exception as e:
-                self.log.warning(f"账户配置异常: {e}")
+            except: pass
 
-        # 阶段 3: 验证合约参数
-        self._validate_contract()
-
-        # 阶段 4: 清理遗留挂单
+        # 验证 size
         if not self.dry_run:
-            self._cancel_all_exchange_orders()
-            time.sleep(0.5)
+            mark = self.client.get_price(self.cfg.symbol)
+            if mark > 0:
+                ok, msg = validate_order_size(to_decimal(self.cfg.size), to_decimal(mark), self.contract_info)
+                if not ok:
+                    self.log.error(f"size无效: {msg}")
+                    sys.exit(1)
 
-        # 阶段 5: 持仓接管或起仓
+        # 清理挂单
+        if not self.dry_run:
+            for o in self.client.get_open_orders(self.cfg.symbol):
+                try: self.client.cancel(self.cfg.symbol, o.get("orderId"))
+                except: pass
+
+        # 接管或起仓
         if self.state.get("stack_top", 0) <= 0:
-            if not self._adopt_existing_position():
+            if not self._adopt_position():
                 self._open_initial()
 
-        # 阶段 6: 挂初始网格
+        # 挂网格
         if self.state.get("stack_top", 0) > 0:
-            self._refresh_orders(reason="startup")
+            self._refresh_orders()
 
-        n_pos = max(0, self.state.get("opens", 0) - self.state.get("closes", 0))
-        self._notify(
-            "策略启动",
-            f"网格={self.GRID_PCT*100:.2f}% | 每单={self.POSITION_SZ}张 | 持仓={n_pos}单",
-            "INFO"
-        )
-        self.log.info(f"启动完成: {mode} | stack_top={self.state.get('stack_top', 0):.6f}")
+        n = max(0, self.state.get("opens", 0) - self.state.get("closes", 0))
+        self._notify(f"启动 | grid={self.GRID_PCT*100:.1f}% sz={self.POSITION_SZ} pos={n}")
 
-    def _cancel_all_exchange_orders(self):
-        """启动时清理遗留挂单"""
-        if self.dry_run:
-            return
+    def _adopt_position(self) -> bool:
+        """接管持仓"""
+        if self.dry_run: return False
         try:
-            orders = self.client.get_open_orders(self.cfg.symbol)
-            for order in orders:
-                try:
-                    self.client.cancel(self.cfg.symbol, order.get("orderId"))
-                except:
-                    pass
-            if orders:
-                self.log.info(f"清理 {len(orders)} 笔挂单")
-        except Exception as e:
-            self.log.warning(f"清理异常: {e}")
-
-    def _validate_contract(self):
-        """验证合约参数"""
-        if self.dry_run:
-            return
-        try:
-            mark = self.client.get_price(self.cfg.symbol)
-            if mark <= 0:
-                return
-            size = to_decimal(self.cfg.size)
-            ok, msg = validate_order_size(size, to_decimal(mark), self.contract_info)
-            if not ok:
-                self.log.error(f"size 验证失败: {msg}")
-                sys.exit(1)
-        except Exception as e:
-            self.log.warning(f"合约验证异常: {e}")
-
-
-    def _check_risk(self, current_price: float) -> bool:
-        """风控检查：保证金率 + 单笔限额"""
-        if self.dry_run:
-            return True
-        try:
-            account = self.client.get_account()
-            equity = float(account["data"][0].get("accountEquity", "0"))
-            if equity < 100:
-                return False
-            notional = self.POSITION_SZ * current_price
-            return notional <= self.cfg.max_notional_usdt
-        except:
-            return False
-
-    def _round_px(self, px: float) -> float:
-        """按合约 pricePlace 取整价格（避免精度超限被拒单）"""
-        try:
-            place = int(self.contract_info.get("pricePlace", 4))
-        except (TypeError, ValueError):
-            place = 4
-        return float(quantize_price(to_decimal(px), place))
-
-    # ====== 起仓 ======
-
-    def _adopt_existing_position(self) -> bool:
-        """接管已有持仓（若有）"""
-        if self.dry_run:
-            return False
-        try:
-            resp = self.client.get_position(self.cfg.symbol)
-            for p in resp.get("data", []):
-                if p.get("holdSide") != "short":
-                    continue
-                total = float(p.get("total") or 0)
-                avg_px = float(p.get("openPriceAvg") or 0)
-                if total <= 0 or avg_px <= 0:
-                    continue
-                opens = max(1, int(total / float(self.POSITION_SZ)))
-                self.state["stack_top"] = avg_px
-                self.state["opens"] = opens
-                self.state["closes"] = 0
-                self.state["last_action_time"] = time.time()
-                save_state(self.state)
-                self.log.info(f"接管持仓: {total}张 @ {avg_px:.6f}")
-                return True
-        except Exception as e:
-            self.log.warning(f"接管异常: {e}")
+            for p in self.client.get_position(self.cfg.symbol).get("data", []):
+                if p.get("holdSide") == "short":
+                    total = float(p.get("total") or 0)
+                    avg = float(p.get("openPriceAvg") or 0)
+                    if total > 0 and avg > 0:
+                        self.state["stack_top"] = avg
+                        self.state["opens"] = max(1, int(total / self.POSITION_SZ))
+                        self.state["closes"] = 0
+                        save_state(self.state)
+                        self.log.info(f"接管 {total}张 @{avg:.6f}")
+                        return True
+        except: pass
         return False
 
     def _open_initial(self):
-        """起仓：第一单市价空"""
-        self.log.info(f"起仓市价空 {self.POSITION_SZ} 张")
-        try:
-            resp = self.client.place_order(
-                self.cfg.symbol, "sell", self.POSITION_SZ, 0.0,
-                order_type="market"
-            )
-            if resp.get("code") != "00000":
-                self.log.error(f"起仓失败: {resp.get('msg')}")
-                sys.exit(1)
-
-            # 获取成交价
-            if self.dry_run:
-                fill_px = 1.76
-            else:
-                fill_px = self.client.get_price(self.cfg.symbol)
-                if fill_px <= 0:
-                    try:
-                        pos = self.client.get_position(self.cfg.symbol)
-                        for p in pos.get("data", []):
-                            if p.get("holdSide") == "short":
-                                fill_px = float(p.get("openPriceAvg") or 0)
-                                break
-                    except Exception:
-                        pass
-
-            if fill_px <= 0:
-                self.log.error("无法获取成交价")
-                sys.exit(1)
-
-            self.state["stack_top"] = fill_px
-            self.state["opens"] = 1
-            self.state["last_action_time"] = time.time()
-            save_state(self.state)
-            self.log.info(f"起仓成功 @ {fill_px:.6f}")
-        except Exception as e:
-            self.log.error(f"起仓异常: {e}")
+        """市价起仓"""
+        self.log.info(f"起仓 {self.POSITION_SZ}张")
+        resp = self.client.place_order(self.cfg.symbol, "sell", self.POSITION_SZ, 0.0, order_type="market")
+        if resp.get("code") != "00000":
+            self.log.error(f"起仓失败: {resp.get('msg')}")
+            sys.exit(1)
+        
+        px = 1.76 if self.dry_run else self.client.get_price(self.cfg.symbol)
+        if px <= 0:
+            try:
+                for p in self.client.get_position(self.cfg.symbol).get("data", []):
+                    if p.get("holdSide") == "short":
+                        px = float(p.get("openPriceAvg") or 0)
+            except: pass
+        
+        if px <= 0:
+            self.log.error("无法获取成交价")
             sys.exit(1)
 
-    # ====== 主循环 ======
+        self.state["stack_top"] = px
+        self.state["opens"] = 1
+        self.state["closes"] = 0
+        save_state(self.state)
+        self.log.info(f"起仓成功 @{px:.6f}")
 
     def run(self):
-        """策略主循环 - 事件检查 + 定时对账"""
+        """主循环"""
         self.init()
-        self.log.info(f"策略主循环启动, 轮询间隔={self.cfg.interval}s")
-
+        self.log.info("运行中...")
         while self._running:
             try:
-                self._tick()
+                if not self.dry_run:
+                    self._check_fills()
+                    # 定时对账
+                    now = time.time()
+                    if now - self.last_reconcile_ts >= self.RECONCILE_SEC:
+                        self._reconcile()
+                        self.last_reconcile_ts = now
             except Exception as e:
-                self.log.error(f"策略异常: {e}", exc_info=True)
+                self.log.error(f"异常: {e}")
             time.sleep(self.cfg.interval)
-
         save_state(self.state)
-        self.log.info("策略已安全退出")
-
-    def _tick(self):
-        """主循环：订单检查 + 定时对账"""
-        with self._lock:
-            # 检查订单填充（实时）
-            if not self.dry_run:
-                self._check_fills()
-
-            # 定时对账（每 RECONCILE_INTERVAL 秒）
-            now = time.time()
-            if now - self.last_reconcile_ts >= self.RECONCILE_INTERVAL:
-                self._reconcile()
-                self.last_reconcile_ts = now
 
     def _reconcile(self):
-        """定时对账：本地栈 vs 交易所实际持仓"""
-        if self.dry_run:
-            return
-
+        """对账：本地 vs 交易所持仓"""
         try:
-            resp = self.client.get_position(self.cfg.symbol)
-            okx_size = 0.0
-            for p in resp.get("data", []):
+            pos_data = self.client.get_position(self.cfg.symbol).get("data", [])
+            okx_sz = 0
+            for p in pos_data:
                 if p.get("holdSide") == "short":
-                    try:
-                        okx_size = float(p.get("total") or 0)
-                        break
-                    except (TypeError, ValueError):
-                        pass
-
-            # 本地预期持仓
-            local_size = (self.state.get("opens", 0) - self.state.get("closes", 0)) * self.POSITION_SZ
-
-            # 容差：< 1 张认为一致
-            diff = abs(okx_size - local_size)
+                    okx_sz = float(p.get("total") or 0)
+                    break
+            
+            local_sz = (self.state.get("opens", 0) - self.state.get("closes", 0)) * self.POSITION_SZ
+            diff = abs(okx_sz - local_sz)
+            
             if diff < self.POSITION_SZ - 1e-9:
-                return  # 一致，无需动作
-
-            # 持仓不一致 → 自动修复（以交易所为准）
-            if okx_size < local_size:
-                # 本地多 → closes 增加
-                n_closed = round((local_size - okx_size) / self.POSITION_SZ)
-                self.state["closes"] += n_closed
-                self.log.warning(f"[对账] 本地多 {n_closed} 张，closes += {n_closed}")
+                return  # 一致
+            
+            # 自动修复
+            if okx_sz < local_sz:
+                n = round((local_sz - okx_sz) / self.POSITION_SZ)
+                self.state["closes"] += n
+                self.log.warning(f"对账: 本地多{n}张 → closes+{n}")
             else:
-                # 本地少 → opens 增加
-                n_added = round((okx_size - local_size) / self.POSITION_SZ)
-                self.state["opens"] += n_added
-                self.log.warning(f"[对账] 本地少 {n_added} 张，opens += {n_added}")
-
+                n = round((okx_sz - local_sz) / self.POSITION_SZ)
+                self.state["opens"] += n
+                self.log.warning(f"对账: 本地少{n}张 → opens+{n}")
+            
             save_state(self.state)
-            # 重挂网格确保完整
-            self._refresh_orders_locked(reason="reconcile")
-
+            self._refresh_orders()
         except Exception as e:
-            self.log.warning(f"[对账] 异常: {e}")
+            self.log.warning(f"对账失败: {e}")
 
     def _check_fills(self):
-        """轮询订单成交状态"""
+        """检查成交"""
         sell_id = self.state.get("pending_sell_ord_id")
-        pending_buys = self.state.get("pending_buys", {})
-        if not sell_id and not pending_buys:
+        buys = self.state.get("pending_buys", {})
+        if not sell_id and not buys:
             return
 
         try:
             open_ids = {o.get("orderId") for o in self.client.get_open_orders(self.cfg.symbol)}
-        except Exception:
+        except:
             return
 
-        # SELL 单成交检测
+        # SELL 成交
         if sell_id and sell_id not in open_ids:
             info = self.client.get_order_info(self.cfg.symbol, sell_id)
-            status = info.get("orderStatus", "")
-            if status == "filled":
-                fill_px = float(info.get("avgPrice") or 0) or self.state.get("pending_sell_px") or 0.0
-                self.state["pending_sell_ord_id"] = None
-                self.state["pending_sell_px"] = None
-                self.state["stack_top"] = fill_px
+            if info.get("orderStatus") == "filled":
+                px = float(info.get("avgPrice") or 0) or self.state.get("pending_sell_px") or 0
+                self.state["stack_top"] = px
                 self.state["opens"] += 1
-                self.state["last_action_time"] = time.time()
-                save_state(self.state)
-                self.log.info(f"SELL成交 @ {fill_px:.6f}")
-                self._notify("🔻 SELL成交", f"opens={self.state['opens']}", "TRADE")
-                self._refresh_orders_locked(reason="fill_sell")
-            elif status == "cancelled":
                 self.state["pending_sell_ord_id"] = None
                 self.state["pending_sell_px"] = None
                 save_state(self.state)
-                self._refresh_orders_locked(reason="sell_cancelled")
+                self._notify(f"SELL @{px:.6f} opens={self.state['opens']}")
+                self._refresh_orders()
 
-        # BUY 单成交检测
-        for ord_id in list(pending_buys.keys()):
-            if ord_id in open_ids:
+        # BUY 成交
+        for oid in list(buys.keys()):
+            if oid in open_ids:
                 continue
-            info = self.client.get_order_info(self.cfg.symbol, ord_id)
-            status = info.get("orderStatus", "")
-            if status == "filled":
-                fill_px = float(info.get("avgPrice") or 0)
+            info = self.client.get_order_info(self.cfg.symbol, oid)
+            if info.get("orderStatus") == "filled":
+                px = float(info.get("avgPrice") or 0)
                 self.state["closes"] += 1
-                self.state["last_action_time"] = time.time()
-
-                # 撤销所有旧 BUY 单
-                for buy_id in list(pending_buys.keys()):
-                    try:
-                        self.client.cancel(self.cfg.symbol, buy_id)
-                    except:
-                        pass
+                for bid in list(buys.keys()):
+                    try: self.client.cancel(self.cfg.symbol, bid)
+                    except: pass
                 self.state["pending_buys"] = {}
                 save_state(self.state)
+                
+                entry = self.state.get("stack_top", 0)
+                pnl = (entry - px) * self.POSITION_SZ
+                self._notify(f"BUY @{px:.6f} PnL={pnl:+.2f} closes={self.state['closes']}")
+                self._refresh_orders()
 
-                entry_px = float(info.get("avgPrice") or self.state.get("stack_top", 0))
-                pnl = (entry_px - fill_px) * self.POSITION_SZ
-                self.log.info(f"BUY成交 @ {fill_px:.6f} | 盈亏={pnl:+.2f}")
-                self._notify("🔺 BUY成交", f"closes={self.state['closes']} | PnL={pnl:+.2f}", "TRADE")
-                self._refresh_orders_locked(reason="fill_buy")
-            elif status == "cancelled":
-                pending_buys.pop(ord_id, None)
-                save_state(self.state)
-                self._refresh_orders_locked(reason="buy_cancelled")
-
-    # ====== 核心: 重挂 SELL + 多个 BUY ======
-
-    def _refresh_orders(self, reason: str = ""):
-        """重挂目标: 1 个 SELL + min(持仓数, MAX_BUYS) 个 BUY"""
+    def _refresh_orders(self):
+        """重挂网格"""
         with self._lock:
-            self._refresh_orders_locked(reason)
+            stack_top = self.state.get("stack_top", 0)
+            if stack_top <= 0:
+                return
 
-    def _refresh_orders_locked(self, reason: str):
-        """重挂网格：1 个 SELL + min(持仓数, MAX_BUYS) 个 BUY"""
-        stack_top = self.state.get("stack_top", 0.0)
-        if stack_top <= 0:
-            self._cancel_all_pending()
-            return
+            n_pos = max(0, self.state.get("opens", 0) - self.state.get("closes", 0))
+            
+            # SELL
+            sell_px = self._round_px(stack_top * (1 + self.GRID_PCT))
+            cur_sell_id = self.state.get("pending_sell_ord_id")
+            cur_sell_px = self.state.get("pending_sell_px")
+            
+            if not cur_sell_id or cur_sell_px is None or abs(cur_sell_px - sell_px) > 1e-9:
+                if cur_sell_id:
+                    try: self.client.cancel(self.cfg.symbol, cur_sell_id)
+                    except: pass
+                self._place_sell(sell_px)
 
-        n_positions = max(0, self.state.get("opens", 0) - self.state.get("closes", 0))
+            # BUY 梯队
+            depth = min(n_pos, self.MAX_BUYS)
+            desired = []
+            for i in range(1, depth + 1):
+                tpx = self._round_px(stack_top * ((1 - self.GRID_PCT) ** i))
+                epx = stack_top * ((1 - self.GRID_PCT) ** (i - 1))
+                desired.append((tpx, epx))
 
-        # SELL 目标价
-        desired_sell_px = self._round_px(stack_top * (1 + self.GRID_PCT))
-        cur_sell_px = self.state.get("pending_sell_px")
-        cur_sell_id = self.state.get("pending_sell_ord_id")
+            pending = self.state.get("pending_buys", {})
+            cur_pxs = [float(v.get("target_px", 0)) for v in pending.values()]
+            tol = max(1e-9, stack_top * self.GRID_PCT * 0.4)
 
-        if not cur_sell_id or cur_sell_px is None or abs(cur_sell_px - desired_sell_px) > 1e-9:
-            if cur_sell_id:
-                try:
-                    self.client.cancel(self.cfg.symbol, cur_sell_id)
-                except:
-                    pass
-                self.state["pending_sell_ord_id"] = None
-                self.state["pending_sell_px"] = None
-            self._place_limit_sell(desired_sell_px, reason)
+            # 撤销多余
+            for oid, info in list(pending.items()):
+                if not any(abs(float(info.get("target_px", 0)) - d[0]) < tol for d in desired):
+                    try: self.client.cancel(self.cfg.symbol, oid)
+                    except: pass
+                    pending.pop(oid, None)
 
-        # BUY 梯队
-        depth = min(n_positions, self.MAX_BUYS)
-        desired_buys = []
-        for i in range(1, depth + 1):
-            target_px = self._round_px(stack_top * ((1 - self.GRID_PCT) ** i))
-            entry_px = stack_top * ((1 - self.GRID_PCT) ** (i - 1))
-            desired_buys.append((target_px, entry_px))
+            # 挂缺少
+            for tpx, epx in desired:
+                if not any(abs(tpx - c) < tol for c in cur_pxs):
+                    self._place_buy(epx, tpx)
 
-        pending_buys = self.state.get("pending_buys", {})
-        current_buy_pxs = [float(v.get("target_px", 0)) for v in pending_buys.values()]
-        match_tol = max(1e-9, stack_top * self.GRID_PCT * 0.4)
+            save_state(self.state)
 
-        # 撤销多余的 BUY
-        to_cancel = [
-            ord_id for ord_id, info in pending_buys.items()
-            if not any(abs(float(info.get("target_px", 0)) - d[0]) < match_tol for d in desired_buys)
-        ]
-        for ord_id in to_cancel:
+    def _place_sell(self, px: float):
+        """挂SELL"""
+        # 风控
+        if not self.dry_run:
             try:
-                self.client.cancel(self.cfg.symbol, ord_id)
-            except:
-                pass
-            pending_buys.pop(ord_id, None)
-
-        # 挂缺少的 BUY
-        for target_px, entry_px in desired_buys:
-            if not any(abs(target_px - current) < match_tol for current in current_buy_pxs):
-                self._place_limit_buy(entry_px, target_px)
-
-        self.state["last_refresh_ts"] = time.time()
-        save_state(self.state)
-
-    def _place_limit_sell(self, target_px: float, reason: str):
-        """挂 SELL 限价单（加仓），带风控检查"""
-        if not self._check_risk(target_px):
-            self.log.warning("风控拒加仓")
-            return
+                acc = self.client.get_account()
+                eq = float(acc["data"][0].get("accountEquity", "0"))
+                if eq < 100:
+                    self.log.warning("权益不足")
+                    return
+                if self.POSITION_SZ * px > self.cfg.max_notional_usdt:
+                    self.log.warning("单笔超限")
+                    return
+            except: pass
 
         try:
-            resp = self.client.place_order(
-                self.cfg.symbol, "sell", self.POSITION_SZ, target_px,
-                order_type="limit", reduce_only=False,
-                cl_ord_id=_gen_cl_ord_id("spSELL")
-            )
+            resp = self.client.place_order(self.cfg.symbol, "sell", self.POSITION_SZ, px, order_type="limit", cl_ord_id=_gen_cl_ord_id("S"))
             if resp.get("code") == "00000":
-                ord_id = resp.get("data", {}).get("orderId")
-                self.state["pending_sell_ord_id"] = ord_id
-                self.state["pending_sell_px"] = target_px
+                oid = resp.get("data", {}).get("orderId")
+                self.state["pending_sell_ord_id"] = oid
+                self.state["pending_sell_px"] = px
             else:
-                self.log.warning(f"SELL被拒: {resp.get('msg')}")
+                self.log.warning(f"SELL拒: {resp.get('msg')}")
                 self._market_add()
         except Exception as e:
-            self.log.error(f"SELL异常: {e}")
+            self.log.error(f"SELL错: {e}")
 
-    def _place_limit_buy(self, entry_px: float, target_px: float):
-        """挂 BUY 限价单（平仓），只减仓"""
+    def _place_buy(self, entry: float, px: float):
+        """挂BUY"""
         try:
-            resp = self.client.place_order(
-                self.cfg.symbol, "buy", self.POSITION_SZ, target_px,
-                order_type="limit", reduce_only=True,
-                cl_ord_id=_gen_cl_ord_id("spBUY")
-            )
+            resp = self.client.place_order(self.cfg.symbol, "buy", self.POSITION_SZ, px, order_type="limit", reduce_only=True, cl_ord_id=_gen_cl_ord_id("B"))
             if resp.get("code") == "00000":
-                ord_id = resp.get("data", {}).get("orderId")
-                if ord_id:
-                    self.state["pending_buys"][ord_id] = {
-                        "entry_px": entry_px,
-                        "target_px": target_px,
-                    }
-        except Exception as e:
-            self.log.warning(f"BUY异常: {e}")
+                oid = resp.get("data", {}).get("orderId")
+                if oid:
+                    self.state["pending_buys"][oid] = {"entry_px": entry, "target_px": px}
+        except: pass
 
     def _market_add(self):
-        """市价加仓（限价被拒时的降级）"""
-        cur_px = self.client.get_price(self.cfg.symbol)
-        check_px = cur_px or self.state.get("stack_top", 0.0)
-        if not self._check_risk(check_px):
-            return
-
+        """市价加仓"""
+        px = self.client.get_price(self.cfg.symbol) or self.state.get("stack_top", 0)
         try:
-            resp = self.client.place_order(
-                self.cfg.symbol, "sell", self.POSITION_SZ, 0.0,
-                order_type="market"
-            )
+            resp = self.client.place_order(self.cfg.symbol, "sell", self.POSITION_SZ, 0.0, order_type="market")
             if resp.get("code") == "00000":
-                self.state["stack_top"] = check_px
+                self.state["stack_top"] = px
                 self.state["opens"] += 1
-                self.state["last_action_time"] = time.time()
                 save_state(self.state)
-                self._refresh_orders(reason="market_add")
-        except Exception as e:
-            self.log.warning(f"市价加仓失败: {e}")
+                self._refresh_orders()
+        except: pass
 
-    def _cancel_all_pending(self):
-        """撤销所有待成交挂单"""
-        sell_id = self.state.get("pending_sell_ord_id")
-        if sell_id:
-            try:
-                self.client.cancel(self.cfg.symbol, sell_id)
-            except:
-                pass
-            self.state["pending_sell_ord_id"] = None
-            self.state["pending_sell_px"] = None
-
-        for ord_id in self.state.get("pending_buys", {}):
-            try:
-                self.client.cancel(self.cfg.symbol, ord_id)
-            except:
-                pass
-        self.state["pending_buys"] = {}
-        save_state(self.state)
+    def _round_px(self, px: float) -> float:
+        """取整价格"""
+        try:
+            place = int(self.contract_info.get("pricePlace", 4))
+        except:
+            place = 4
+        return float(quantize_price(to_decimal(px), place))
 
 
 def main():
     cfg = parse_args()
-    strategy = Strategy(cfg)
-    strategy.run()
+    Strategy(cfg).run()
 
 
 if __name__ == "__main__":
