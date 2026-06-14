@@ -558,19 +558,6 @@ class Strategy:
 
 def main():
     cfg = parse_args()
-
-    if cfg.mode == "live":
-        print("=" * 60)
-        print("  *** 风险提示 ***")
-        print("  合约做空可能爆仓，本程序不保证盈利。")
-        print("  请确保已充分了解风险后再运行。")
-        print("  API Key 请勿泄露，建议只开读取+交易权限，不开提现。")
-        print("=" * 60)
-        confirm = input("确认运行 live 模式？请输入 yes 继续: ")
-        if confirm.strip().lower() != "yes":
-            print("已取消。")
-            sys.exit(0)
-
     strategy = Strategy(cfg)
     strategy.run()
 
