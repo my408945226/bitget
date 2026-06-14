@@ -58,28 +58,14 @@ class Strategy:
         self._running = False
 
     def _notify(self, event: str, details: str, level: str = "INFO"):
-        """P2: 统一通知入口（控制台 + Telegram）"""
-        icon = {
-            "INFO": "ℹ️",
-            "WARNING": "⚠️",
-            "ERROR": "❌",
-            "TRADE": "💹",
-            "SUCCESS": "✅"
-        }
-        msg = f"<b>{icon.get(level, '')} {self.cfg.symbol}</b>\n{event}\n{details}"
+        """输出通知到日志和 Telegram"""
+        msg = f"{event} | {details}"
+        getattr(self.log, level.lower(), self.log.info)(msg)
 
-        # 控制台/文件日志
-        log_msg = msg.replace("<b>", "").replace("</b>", "")
-        if level == "ERROR":
-            self.log.error(log_msg)
-        elif level == "WARNING":
-            self.log.warning(log_msg)
-        else:
-            self.log.info(log_msg)
-
-        # Telegram（仅实盘模式）
+        # Telegram 通知
         if not self.dry_run and self.cfg.tg_bot_token:
-            send_telegram(msg, self.cfg.tg_bot_token, self.cfg.tg_chat_id, self.log)
+            tg_msg = f"<b>{self.cfg.symbol}</b>\n{event}\n{details}"
+            send_telegram(tg_msg, self.cfg.tg_bot_token, self.cfg.tg_chat_id, self.log)
 
     # ====== 初始化 ======
 
@@ -124,10 +110,11 @@ class Strategy:
         if self.state.get("stack_top", 0) > 0:
             self._refresh_orders(reason="startup")
 
+        n_pos = max(0, self.state.get("opens", 0) - self.state.get("closes", 0))
         self._notify(
-            "🚀 策略启动",
-            f"网格={self.GRID_PCT*100:.2f}% | 每单={self.POSITION_SZ}张 | 持仓={self._n_positions()}单",
-            "SUCCESS"
+            "策略启动",
+            f"网格={self.GRID_PCT*100:.2f}% | 每单={self.POSITION_SZ}张 | 持仓={n_pos}单",
+            "INFO"
         )
         self.log.info(f"启动完成: {mode} | stack_top={self.state.get('stack_top', 0):.6f}")
 
@@ -136,16 +123,16 @@ class Strategy:
         if self.dry_run:
             return
         try:
-            open_orders = self.client.get_open_orders(self.cfg.symbol)
-            for order in open_orders:
+            orders = self.client.get_open_orders(self.cfg.symbol)
+            for order in orders:
                 try:
                     self.client.cancel(self.cfg.symbol, order.get("orderId"))
-                except Exception:
+                except:
                     pass
-            if open_orders:
-                self.log.info(f"撤销 {len(open_orders)} 笔遗留挂单")
+            if orders:
+                self.log.info(f"清理 {len(orders)} 笔挂单")
         except Exception as e:
-            self.log.warning(f"清理挂单异常: {e}")
+            self.log.warning(f"清理异常: {e}")
 
     def _validate_contract(self):
         """验证合约参数"""
@@ -163,40 +150,20 @@ class Strategy:
         except Exception as e:
             self.log.warning(f"合约验证异常: {e}")
 
-    def _n_positions(self) -> int:
-        """当前持仓张数 = opens - closes"""
-        return max(0, self.state.get("opens", 0) - self.state.get("closes", 0))
 
-    def _check_margin_ratio(self) -> bool:
-        """检查保证金率（对应 OKX MIN_MARGIN_RATIO）
-
-        Bitget UTA v3 无直接 marginRatio 字段，用账户权益作为代理指标。
-        账户权益 < 100 USDT 时禁止加仓，防止小资金过度杠杆。
-        """
+    def _check_risk(self, current_price: float) -> bool:
+        """风控检查：保证金率 + 单笔限额"""
         if self.dry_run:
             return True
         try:
             account = self.client.get_account()
-            equity_str = account["data"][0].get("accountEquity", "0")
-            equity = float(equity_str)
+            equity = float(account["data"][0].get("accountEquity", "0"))
             if equity < 100:
-                self.log.error(f"[风控] 账户权益 {equity:.2f} < 100 USDT，禁止加仓")
                 return False
-            return True
-        except Exception as e:
-            self.log.warning(f"[风控] 查询账户失败: {e}，跳过本轮加仓")
+            notional = self.POSITION_SZ * current_price
+            return notional <= self.cfg.max_notional_usdt
+        except:
             return False
-
-    def _check_position_limit(self, current_price: float) -> bool:
-        """检查单笔持仓名义价值（对应 OKX MAX_NOTIONAL_USDT）"""
-        notional = self.POSITION_SZ * current_price
-        if notional > self.cfg.max_notional_usdt:
-            self.log.error(
-                f"[风控] 单笔价值 {notional:.2f} > "
-                f"{self.cfg.max_notional_usdt} USDT，禁止加仓"
-            )
-            return False
-        return True
 
     def _round_px(self, px: float) -> float:
         """按合约 pricePlace 取整价格（避免精度超限被拒单）"""
@@ -423,7 +390,7 @@ class Strategy:
             self._cancel_all_pending()
             return
 
-        n_positions = self._n_positions()
+        n_positions = max(0, self.state.get("opens", 0) - self.state.get("closes", 0))
 
         # SELL 目标价
         desired_sell_px = self._round_px(stack_top * (1 + self.GRID_PCT))
@@ -474,11 +441,8 @@ class Strategy:
 
     def _place_limit_sell(self, target_px: float, reason: str):
         """挂 SELL 限价单（加仓），带风控检查"""
-        if not self._check_margin_ratio():
-            self.log.warning("保证金不足，拒加仓")
-            return
-        if not self._check_position_limit(target_px):
-            self.log.warning("单笔超限，拒加仓")
+        if not self._check_risk(target_px):
+            self.log.warning("风控拒加仓")
             return
 
         try:
@@ -519,7 +483,7 @@ class Strategy:
         """市价加仓（限价被拒时的降级）"""
         cur_px = self.client.get_price(self.cfg.symbol)
         check_px = cur_px or self.state.get("stack_top", 0.0)
-        if not self._check_position_limit(check_px):
+        if not self._check_risk(check_px):
             return
 
         try:
