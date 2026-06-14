@@ -200,24 +200,23 @@ class Strategy:
             return False
 
     def _check_account_config(self) -> bool:
-        """账户配置检查（快速失败原则）"""
+        """账户配置检查（Bitget UTA）"""
         try:
             # ① 检查合约有效性
             if not self.contract_info or self.contract_info.get("symbolStatus") != "normal":
                 self.log.error(f"合约无效: {self.contract_info.get('symbolStatus')}")
                 return False
 
-            # ② 账户层级检查（必须为 3 = 跨币种保证金）
-            acc = self.client.get_account()
-            acct_lv = acc.get("data", [{}])[0].get("accountLevel", "")
-            if acct_lv != "3":
-                self.log.error(f"账户层级必须为 3，当前: {acct_lv}")
+            # ② 持仓模式必须为 one_way_mode（单向持仓）
+            resp = self.client.set_hold_mode("one_way_mode")
+            if resp.get("code") != "00000":
+                self.log.error(f"设置单向持仓失败: {resp.get('msg')}")
                 return False
 
             # ③ 杠杆一致性检查（有持仓时必须 = 3x）
             positions = self.client.get_position(self.cfg.symbol).get("data", [])
             for p in positions:
-                if float(p.get("pos", 0)) != 0:
+                if float(p.get("total", 0)) != 0:
                     lever = float(p.get("lever", 0))
                     if abs(lever - 3) > 0.1:
                         self.log.error(f"杠杆不一致: {lever}，需要 3x")
