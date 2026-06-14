@@ -193,24 +193,41 @@ size=100 验证通过
 
 ⚠️ **风险提示**：实盘会产生真实盈亏，请先小额测试！
 
+#### 模式 1：市价起仓（最简单）
+```bash
+python -m bitget_short_pyramid.strategy live \
+  --symbol BGBUSDT \
+  --size 4 \
+  --grid 0.005
+```
+
+#### 模式 2：限价起仓（指定价格）
+```bash
+python -m bitget_short_pyramid.strategy live \
+  --symbol BGBUSDT \
+  --size 4 \
+  --grid 0.005 \
+  --initial-sell-px 1.80
+```
+
+#### 模式 3：基准价起仓（自动偏移）
+```bash
+python -m bitget_short_pyramid.strategy live \
+  --symbol BGBUSDT \
+  --size 4 \
+  --grid 0.005 \
+  --adopt-sell-px 1.75
+```
+
+**完整参数示例**：
 ```bash
 python -m bitget_short_pyramid.strategy live \
   --symbol BGBUSDT \
   --size 4 \
   --grid 0.005 \
   --interval 5 \
-  --max-notional-usdt 10000
-```
-
-**启动确认**：
-```
-============================================================
-  *** 风险提示 ***
-  合约做空可能爆仓，本程序不保证盈利。
-  请确保已充分了解风险后再运行。
-  API Key 请勿泄露，建议只开读取+交易权限，不开提现。
-============================================================
-确认运行 live 模式？请输入 yes 继续: yes
+  --leverage 3 \
+  --max-notional 10000
 ```
 
 ### 后台运行（Screen）
@@ -272,6 +289,58 @@ python -m bitget_short_pyramid.strategy live --symbol TONUSDT --size 50 --grid 0
 - **高频震荡**（如 BGB）：`--grid 0.005`（0.5%）
 - **中频震荡**（如 WLD）：`--grid 0.015`（1.5%）
 - **低频震荡**（如 BTC）：`--grid 0.025`（2.5%）
+
+### 起仓模式参数（三选一，可选）
+
+| 参数 | 说明 | 何时使用 | 示例 |
+|------|------|---------|------|
+| **默认（无参数）** | 市价起仓 1 张 | 想立即入场 | （无） |
+| `--initial-sell-px` | 限价起仓，立即启动网格 | 等待特定价格 | `--initial-sell-px 1.80` |
+| `--adopt-sell-px` | 基准价起仓，自动往上偏移 | 用基准价做参考 | `--adopt-sell-px 1.75` |
+
+**三种模式详解**：
+
+#### 1️⃣ 默认（市价起仓）
+```bash
+python -m bitget_short_pyramid.strategy live \
+  --symbol BGBUSDT --size 4 --grid 0.005
+```
+- **动作**：立即市价空 1 张
+- **stack_top**：设置为成交价
+- **网格启动**：成交后启动
+- **优点**：最快入场
+- **缺点**：可能遇到滑点
+
+#### 2️⃣ 限价模式（--initial-sell-px）
+```bash
+python -m bitget_short_pyramid.strategy live \
+  --symbol BGBUSDT --size 4 --grid 0.005 \
+  --initial-sell-px 1.80
+```
+- **动作**：限价挂 1 张 @ 1.80，**网格立即启动**
+- **stack_top**：设置为 1.80（不等成交）
+- **BUY 梯队**：立即在 1.75, 1.73, 1.71... 挂单
+- **SELL 挂单**：在 1.80 等待成交
+- **优点**：控制入场价，网格无延迟
+- **缺点**：如果价格没有达到 1.80，SELL 可能永不成交
+
+#### 3️⃣ 基准价模式（--adopt-sell-px）
+```bash
+python -m bitget_short_pyramid.strategy live \
+  --symbol BGBUSDT --size 4 --grid 0.005 \
+  --adopt-sell-px 1.75
+```
+- **动作**：基准 1.75 自动往上偏移 0.5%（grid 幅度）→ SELL @ 1.7538
+- **stack_top**：设置为基准价 1.75（不是成交价）
+- **BUY 梯队**：立即在 1.726, 1.703, 1.681... 挂单
+- **SELL 挂单**：在 1.7538 等待成交
+- **优点**：基于基准价自动偏移，更灵活
+- **缺点**：需要手动指定基准价
+
+**模式优先级**（同时指定时）：
+```
+--adopt-sell-px > --initial-sell-px > 默认市价
+```
 
 ### 风控参数（重要）
 
