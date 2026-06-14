@@ -1,4 +1,4 @@
-"""包入口: python -m bitget_short_pyramid"""
+"""包入口: python -m bitget"""
 import sys
 
 if __name__ == "__main__":
@@ -6,8 +6,8 @@ if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "monitor":
         # 移除 "monitor" 参数，留下其他参数给 config parser
         sys.argv.pop(1)
-        from .monitor import main
+        from monitor import main
     else:
-        from .strategy import main
+        from strategy import main
 
     main()

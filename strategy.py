@@ -10,12 +10,12 @@ import time
 import signal
 import threading
 
-from .config import parse_args, Config
-from .client import BitgetClient, _gen_cl_ord_id
-from .logger import setup_logger
-from .state import load_state, save_state, State
-from .precision import to_decimal, quantize_price, validate_order_size
-from .utils import send_telegram
+from config import parse_args, Config
+from client import BitgetClient, _gen_cl_ord_id
+from logger import setup_logger
+from state import load_state, save_state, State
+from precision import to_decimal, quantize_price, validate_order_size
+from utils import send_telegram
 
 
 class Strategy:
@@ -140,7 +140,7 @@ class Strategy:
                     if p.get("holdSide") == "short":
                         px = float(p.get("openPriceAvg") or 0)
             except: pass
-        
+
         if px <= 0:
             self.log.error("无法获取成交价")
             sys.exit(1)
@@ -345,12 +345,12 @@ class Strategy:
                 return
 
             n_pos = max(0, self.state.get("opens", 0) - self.state.get("closes", 0))
-            
+
             # SELL
             sell_px = self._round_px(stack_top * (1 + self.GRID_PCT))
             cur_sell_id = self.state.get("pending_sell_ord_id")
             cur_sell_px = self.state.get("pending_sell_px")
-            
+
             if not cur_sell_id or cur_sell_px is None or abs(cur_sell_px - sell_px) > 1e-9:
                 if cur_sell_id:
                     try: self.client.cancel(self.cfg.symbol, cur_sell_id)

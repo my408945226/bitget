@@ -8,9 +8,8 @@
   - 心跳信号：确保监控在线
 
 使用：
-  python -m bitget_short_pyramid.monitor --symbol BGBUSDT --interval 60
-  或
-  python monitor.py
+  python monitor.py --symbol BGBUSDT --interval 60
+  或在后台运行
 """
 import csv
 import logging
@@ -22,10 +21,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from .config import parse_args, Config
-from .client import BitgetClient
-from .logger import setup_logger
-from .utils import send_telegram
+from config import parse_args, Config
+from client import BitgetClient
+from logger import setup_logger
+from utils import send_telegram
 
 
 @dataclass

@@ -26,4 +26,4 @@ python -m bitget_short_pyramid.strategy live \
 cd C:\Users\Deedee\Desktop\database\bitget
 python3 -m bitget_short_pyramid.strategy live --symbol BGBUSDT --size 4 --grid 0.005 --adopt-sell-px 1.7815
 
-python -m bitget_short_pyramid.strategy live --symbol IDUSDT --size 200 --grid 0.01
+python3 -m bitget_short_pyramid.strategy live --symbol IDUSDT --size 200 --grid 0.01
