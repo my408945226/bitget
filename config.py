@@ -53,3 +53,23 @@ def parse_args() -> Config:
         secret_key=os.getenv("BITGET_SECRET_KEY", ""),
         passphrase=os.getenv("BITGET_PASSPHRASE", ""),
     )
+
+
+def parse_monitor_args() -> Config:
+    """监控专用参数解析"""
+    load_dotenv()
+    parser = argparse.ArgumentParser(description="Bitget 账户监控")
+    args = parser.parse_args()
+
+    return Config(
+        mode="dry-run",
+        symbol="",
+        size=1.0,
+        grid_pct=0.0,
+        interval=60,  # 固定 60 秒
+        tg_bot_token=os.getenv("TG_BOT_TOKEN", ""),
+        tg_chat_id=os.getenv("TG_CHAT_ID", ""),
+        api_key=os.getenv("BITGET_API_KEY", ""),
+        secret_key=os.getenv("BITGET_SECRET_KEY", ""),
+        passphrase=os.getenv("BITGET_PASSPHRASE", ""),
+    )

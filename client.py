@@ -150,7 +150,9 @@ class BitgetClient:
     def get_position(self, symbol: str) -> dict:
         """GET /api/v3/position/current-position - 获取持仓"""
         path = "/api/v3/position/current-position"
-        params = {"category": "USDT-FUTURES", "symbol": symbol}
+        params = {"category": "USDT-FUTURES"}
+        if symbol:
+            params["symbol"] = symbol
         resp = self._get(path, params, private=True)
         if resp.get("code") != "00000":
             return resp
