@@ -42,6 +42,20 @@ def _setup_logger(symbol: str, log_dir: str = "logs") -> logging.Logger:
     return logger
 
 
+def _send_telegram(msg: str, bot_token: str, chat_id: str):
+    """发送 Telegram 消息"""
+    if not bot_token or not chat_id or not requests:
+        return
+    try:
+        requests.post(
+            f"https://api.telegram.org/bot{bot_token}/sendMessage",
+            json={"chat_id": chat_id, "text": msg, "parse_mode": "HTML"},
+            timeout=5
+        )
+    except Exception:
+        pass
+
+
 # ============ 精度处理模块 ============
 def _to_decimal(value) -> Decimal:
     """安全转换为 Decimal"""
@@ -136,21 +150,6 @@ def _save_state(state: State) -> None:
             except Exception:
                 pass
         raise Exception(f"状态保存失败: {e}")
-
-
-# ============ 通知模块 ============
-def _send_telegram(msg: str, bot_token: str, chat_id: str):
-    """发送 Telegram 消息"""
-    if not bot_token or not chat_id or not requests:
-        return
-    try:
-        requests.post(
-            f"https://api.telegram.org/bot{bot_token}/sendMessage",
-            json={"chat_id": chat_id, "text": msg, "parse_mode": "HTML"},
-            timeout=5
-        )
-    except Exception:
-        pass
 
 
 class Strategy:

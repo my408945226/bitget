@@ -1,10 +1,51 @@
 """账户监控器 - 保证金率告警"""
 import time
+import os
+import logging
+from datetime import datetime
+
+try:
+    import requests
+except ImportError:
+    requests = None
 
 from config import parse_monitor_args
 from client import BitgetClient
-from logger import setup_logger
-from utils import send_telegram
+
+
+def _setup_logger(name: str):
+    """创建日志记录器"""
+    os.makedirs("logs", exist_ok=True)
+    logger = logging.getLogger(name)
+    if logger.handlers:
+        return logger
+    logger.setLevel(logging.DEBUG)
+    fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+    ch = logging.StreamHandler()
+    ch.setLevel(logging.INFO)
+    ch.setFormatter(fmt)
+    logger.addHandler(ch)
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    log_file = os.path.join("logs", f"{name}_{timestamp}.log")
+    fh = logging.FileHandler(log_file, encoding="utf-8")
+    fh.setLevel(logging.DEBUG)
+    fh.setFormatter(fmt)
+    logger.addHandler(fh)
+    return logger
+
+
+def _send_telegram(msg: str, bot_token: str, chat_id: str):
+    """发送 Telegram 消息"""
+    if not bot_token or not chat_id or not requests:
+        return
+    try:
+        requests.post(
+            f"https://api.telegram.org/bot{bot_token}/sendMessage",
+            json={"chat_id": chat_id, "text": msg, "parse_mode": "HTML"},
+            timeout=5
+        )
+    except Exception:
+        pass
 
 
 class AccountMonitor:
@@ -16,7 +57,7 @@ class AccountMonitor:
 
     def __init__(self, cfg):
         self.cfg = cfg
-        self.log = setup_logger("monitor")
+        self.log = _setup_logger("monitor")
         self.client = BitgetClient(cfg.api_key, cfg.secret_key, cfg.passphrase, self.log)
         self._last_alerts = {}
         self._start_ts = time.time()
@@ -79,7 +120,7 @@ class AccountMonitor:
     def _send_msg(self, msg: str):
         """发送 Telegram"""
         if self.cfg.tg_bot_token:
-            send_telegram(f"账户监控\n{msg}", self.cfg.tg_bot_token, self.cfg.tg_chat_id)
+            _send_telegram(f"账户监控\n{msg}", self.cfg.tg_bot_token, self.cfg.tg_chat_id)
 
 
 def main():
