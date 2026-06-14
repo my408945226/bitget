@@ -79,8 +79,16 @@ class Strategy:
 
         # 接管或起仓
         if self.state.get("stack_top", 0) <= 0:
-            if not self._adopt_position():
+            # 检查是否已有待成交的起仓单
+            if self.state.get("pending_sell_ord_id"):
+                self.log.info(f"恢复未成交的起仓单 {self.state['pending_sell_ord_id']}")
+            elif not self._adopt_position():
                 self._open_initial()
+
+        # 初始化 pending_buys（防止后续访问时出现 KeyError）
+        if "pending_buys" not in self.state:
+            self.state["pending_buys"] = {}
+            save_state(self.state)
 
         # 挂网格
         if self.state.get("stack_top", 0) > 0:
@@ -162,6 +170,8 @@ class Strategy:
         self.state["closes"] = 0
         self.state["pending_sell_ord_id"] = ord_id
         self.state["pending_sell_px"] = px
+        self.state["pending_buys"] = {}  # 初始化
+        self.state["last_action_time"] = time.time()
         save_state(self.state)
         self.log.info(f"限价挂单 {ord_id} @ {px:.6f}，网格已启动")
 
@@ -185,6 +195,8 @@ class Strategy:
         self.state["closes"] = 0
         self.state["pending_sell_ord_id"] = ord_id
         self.state["pending_sell_px"] = sell_px
+        self.state["pending_buys"] = {}  # 初始化
+        self.state["last_action_time"] = time.time()
         save_state(self.state)
         self.log.info(f"基准挂单 {ord_id} @ {sell_px:.6f}，网格已启动")
 
@@ -207,33 +219,55 @@ class Strategy:
         save_state(self.state)
 
     def _reconcile(self):
-        """对账：本地 vs 交易所持仓"""
+        """对账：本地 vs 交易所持仓 + 漏推送检测"""
         try:
+            # 1. 查询交易所实际持仓
             pos_data = self.client.get_position(self.cfg.symbol).get("data", [])
             okx_sz = 0
             for p in pos_data:
                 if p.get("holdSide") == "short":
                     okx_sz = float(p.get("total") or 0)
                     break
-            
+
             local_sz = (self.state.get("opens", 0) - self.state.get("closes", 0)) * self.POSITION_SZ
             diff = abs(okx_sz - local_sz)
-            
-            if diff < self.POSITION_SZ - 1e-9:
-                return  # 一致
-            
-            # 自动修复
-            if okx_sz < local_sz:
-                n = round((local_sz - okx_sz) / self.POSITION_SZ)
-                self.state["closes"] += n
-                self.log.warning(f"对账: 本地多{n}张 → closes+{n}")
-            else:
-                n = round((okx_sz - local_sz) / self.POSITION_SZ)
-                self.state["opens"] += n
-                self.log.warning(f"对账: 本地少{n}张 → opens+{n}")
-            
-            save_state(self.state)
-            self._refresh_orders()
+
+            # 2. 检测是否一致
+            if diff >= self.POSITION_SZ - 1e-9:
+                # 自动修复
+                if okx_sz < local_sz:
+                    n = round((local_sz - okx_sz) / self.POSITION_SZ)
+                    self.state["closes"] += n
+                    self.log.warning(f"对账: 本地多{n}张 → closes+{n}")
+                else:
+                    n = round((okx_sz - local_sz) / self.POSITION_SZ)
+                    self.state["opens"] += n
+                    self.log.warning(f"对账: 本地少{n}张 → opens+{n}")
+                save_state(self.state)
+                self._refresh_orders()
+
+            # 3. 检测 WS 漏推送（订单消失但未标记成交）
+            try:
+                open_ids = {o.get("orderId") for o in self.client.get_open_orders(self.cfg.symbol)}
+
+                # SELL 单是否丢失
+                sell_id = self.state.get("pending_sell_ord_id")
+                if sell_id and sell_id not in open_ids:
+                    info = self.client.get_order_info(self.cfg.symbol, sell_id)
+                    status = info.get("orderStatus", "unknown")
+                    if status not in ["filled", "cancelled"]:
+                        self.log.warning(f"检测到 SELL 单 {sell_id} 可能未推送成交，状态: {status}")
+
+                # BUY 单是否丢失
+                for oid in self.state.get("pending_buys", {}).keys():
+                    if oid not in open_ids:
+                        info = self.client.get_order_info(self.cfg.symbol, oid)
+                        status = info.get("orderStatus", "unknown")
+                        if status not in ["filled", "cancelled"]:
+                            self.log.warning(f"检测到 BUY 单 {oid} 可能未推送成交，状态: {status}")
+            except Exception as e:
+                self.log.debug(f"漏推送检测失败: {e}")
+
         except Exception as e:
             self.log.warning(f"对账失败: {e}")
 
@@ -249,10 +283,12 @@ class Strategy:
         except:
             return
 
-        # SELL 成交
+        # SELL 成交或被撤销
         if sell_id and sell_id not in open_ids:
             info = self.client.get_order_info(self.cfg.symbol, sell_id)
-            if info.get("orderStatus") == "filled":
+            status = info.get("orderStatus", "")
+
+            if status == "filled":
                 px = float(info.get("avgPrice") or 0) or self.state.get("pending_sell_px") or 0
                 self.state["stack_top"] = px
                 self.state["opens"] += 1
@@ -261,24 +297,44 @@ class Strategy:
                 save_state(self.state)
                 self._notify(f"SELL @{px:.6f} opens={self.state['opens']}")
                 self._refresh_orders()
+            elif status == "cancelled":
+                self.state["pending_sell_ord_id"] = None
+                self.state["pending_sell_px"] = None
+                save_state(self.state)
+                self.log.warning("SELL 单被撤销，将重挂")
+                self._refresh_orders()
 
-        # BUY 成交
+        # BUY 成交或被撤销
         for oid in list(buys.keys()):
             if oid in open_ids:
                 continue
+
             info = self.client.get_order_info(self.cfg.symbol, oid)
-            if info.get("orderStatus") == "filled":
+            status = info.get("orderStatus", "")
+
+            if status == "filled":
                 px = float(info.get("avgPrice") or 0)
                 self.state["closes"] += 1
+
+                # 撤销其他 BUY 单
                 for bid in list(buys.keys()):
-                    try: self.client.cancel(self.cfg.symbol, bid)
-                    except: pass
+                    if bid != oid:
+                        try: self.client.cancel(self.cfg.symbol, bid)
+                        except: pass
+
                 self.state["pending_buys"] = {}
                 save_state(self.state)
-                
+
                 entry = self.state.get("stack_top", 0)
                 pnl = (entry - px) * self.POSITION_SZ
                 self._notify(f"BUY @{px:.6f} PnL={pnl:+.2f} closes={self.state['closes']}")
+                self._refresh_orders()
+
+            elif status == "cancelled":
+                # BUY 单被撤销，只删除这个订单，稍后重挂
+                buys.pop(oid, None)
+                save_state(self.state)
+                self.log.info(f"BUY 单 {oid} 被撤销")
                 self._refresh_orders()
 
     def _refresh_orders(self):
@@ -313,46 +369,62 @@ class Strategy:
             cur_pxs = [float(v.get("target_px", 0)) for v in pending.values()]
             tol = max(1e-9, stack_top * self.GRID_PCT * 0.4)
 
-            # 撤销多余
-            for oid, info in list(pending.items()):
+            # 收集要撤销的订单
+            to_cancel = []
+            for oid, info in pending.items():
                 if not any(abs(float(info.get("target_px", 0)) - d[0]) < tol for d in desired):
-                    try: self.client.cancel(self.cfg.symbol, oid)
-                    except: pass
-                    pending.pop(oid, None)
+                    to_cancel.append(oid)
 
-            # 挂缺少
+            # 撤销
+            for oid in to_cancel:
+                try: self.client.cancel(self.cfg.symbol, oid)
+                except: pass
+                pending.pop(oid, None)
+
+            # 挂缺少的（排除已撤销的）
+            current_pxs = [float(v.get("target_px", 0)) for v in pending.values()]
             for tpx, epx in desired:
-                if not any(abs(tpx - c) < tol for c in cur_pxs):
+                if not any(abs(tpx - c) < tol for c in current_pxs):
                     self._place_buy(epx, tpx)
 
             save_state(self.state)
 
     def _place_sell(self, px: float):
         """挂SELL"""
-        # 风控
+        # 风控检查
         if not self.dry_run:
             try:
                 acc = self.client.get_account()
                 eq = float(acc["data"][0].get("accountEquity", "0"))
                 if eq < 100:
-                    self.log.warning("权益不足")
+                    self.log.warning("权益不足，跳过挂单")
                     return
-                if self.POSITION_SZ * px > self.cfg.max_notional_usdt:
-                    self.log.warning("单笔超限")
+                notional = self.POSITION_SZ * px
+                if notional > self.cfg.max_notional_usdt:
+                    self.log.warning(f"单笔超限 {notional:.2f} > {self.cfg.max_notional_usdt}")
                     return
-            except: pass
+            except Exception as e:
+                self.log.debug(f"风控检查异常: {e}")
 
         try:
-            resp = self.client.place_order(self.cfg.symbol, "sell", self.POSITION_SZ, px, order_type="limit", cl_ord_id=_gen_cl_ord_id("S"))
+            resp = self.client.place_order(
+                self.cfg.symbol, "sell", self.POSITION_SZ, px,
+                order_type="limit", cl_ord_id=_gen_cl_ord_id("S")
+            )
             if resp.get("code") == "00000":
                 oid = resp.get("data", {}).get("orderId")
                 self.state["pending_sell_ord_id"] = oid
                 self.state["pending_sell_px"] = px
+                save_state(self.state)
             else:
-                self.log.warning(f"SELL拒: {resp.get('msg')}")
-                self._market_add()
+                msg = resp.get('msg', '未知错误')
+                self.log.warning(f"SELL 被拒 ({resp.get('code')}): {msg}")
+                # 如果是价格穿过的错误（如 50016），降级市价
+                if "50016" in str(resp.get('code')):
+                    self.log.info("检测到价格穿过，降级市价加仓")
+                    self._market_add()
         except Exception as e:
-            self.log.error(f"SELL错: {e}")
+            self.log.error(f"SELL 异常: {e}")
 
     def _place_buy(self, entry: float, px: float):
         """挂BUY"""
@@ -361,8 +433,12 @@ class Strategy:
             if resp.get("code") == "00000":
                 oid = resp.get("data", {}).get("orderId")
                 if oid:
+                    # 确保 pending_buys 存在
+                    if "pending_buys" not in self.state:
+                        self.state["pending_buys"] = {}
                     self.state["pending_buys"][oid] = {"entry_px": entry, "target_px": px}
-        except: pass
+        except Exception as e:
+            self.log.debug(f"BUY 下单失败: {e}")
 
     def _market_add(self):
         """市价加仓"""
