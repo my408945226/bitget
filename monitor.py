@@ -65,12 +65,15 @@ class AccountMonitor:
 
     def run(self):
         """主循环"""
-        self.log.info("监控启动")
-        self._send_msg("监控启动")
-
         try:
+            self.log.info("监控启动")
+            self._send_msg("监控启动")
+
             while True:
-                self.tick()
+                try:
+                    self.tick()
+                except Exception as e:
+                    self.log.error(f"tick 失败: {e}", exc_info=True)
                 time.sleep(60)
         except KeyboardInterrupt:
             self.log.info("监控已停止")
@@ -78,16 +81,26 @@ class AccountMonitor:
     def tick(self):
         """单次扫描"""
         try:
-            equity = float(self.client.get_account()["data"][0].get("accountEquity", "0"))
-            positions = self.client.get_position("").get("data", [])
+            acct = self.client.get_account()
+            if acct.get("code") != "00000":
+                self.log.warning(f"查询账户失败: {acct.get('msg', 'unknown')}")
+                return
 
+            equity = float(acct.get("data", [{}])[0].get("accountEquity", "0"))
+
+            pos_resp = self.client.get_position("")
+            if pos_resp.get("code") != "00000":
+                self.log.warning(f"查询持仓失败: {pos_resp.get('msg', 'unknown')}")
+                return
+
+            positions = pos_resp.get("data", [])
             if positions:
                 mmr = float(positions[0].get("mmr", 0))
                 mgn_ratio = equity / mmr if mmr > 0 else float('inf')
                 self._check_alerts(equity, mgn_ratio)
                 self._maybe_heartbeat(equity, mgn_ratio)
         except Exception as e:
-            self.log.debug(f"查询异常: {e}")
+            self.log.error(f"tick 异常: {e}", exc_info=True)
 
     def _check_alerts(self, equity: float, mgn_ratio: float):
         """检查保证金率告警"""

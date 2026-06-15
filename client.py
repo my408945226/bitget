@@ -21,6 +21,11 @@ from urllib.parse import urlencode
 
 import requests
 
+try:
+    import websockets
+except ImportError:
+    websockets = None
+
 BASE_URL = "https://api.bitget.com"
 
 
@@ -277,3 +282,69 @@ class BitgetClient:
         else:
             self.log.info(f"POST {path} 成功")
         return data
+
+    # ====== WebSocket 方法 ======
+
+    def _ws_auth_sign(self, ts: str) -> tuple:
+        """生成 WebSocket 认证签名
+        返回 (accessKey, accessSign, accessTimestamp, accessPassphrase)
+        """
+        pre_hash = ts + "GET" + "/user/verify"
+        mac = hmac.new(
+            self.secret_key.encode("utf-8"),
+            pre_hash.encode("utf-8"),
+            hashlib.sha256,
+        )
+        sign = base64.b64encode(mac.digest()).decode("utf-8")
+        return self.api_key, sign, ts, self.passphrase
+
+    async def ws_connect(self, symbol: str, on_message):
+        """连接 WebSocket 并订阅订单更新
+        symbol: 交易对（如 BGBUSDT）
+        on_message: 回调函数，接收订单数据
+        """
+        if not websockets:
+            self.log.warning("websockets 库未安装，WebSocket 功能禁用")
+            return
+
+        try:
+            url = "wss://stream.bitget.com/public/spot/stream"
+            async with websockets.connect(url) as ws:
+                # 发送认证
+                ts = str(int(time.time() * 1000))
+                access_key, access_sign, timestamp, passphrase = self._ws_auth_sign(ts)
+                auth_msg = {
+                    "op": "login",
+                    "args": {
+                        "accessKey": access_key,
+                        "accessSign": access_sign,
+                        "timestamp": timestamp,
+                        "passphrase": passphrase,
+                    },
+                }
+                await ws.send(json.dumps(auth_msg))
+                auth_resp = await ws.recv()
+                self.log.debug(f"WS 认证响应: {auth_resp}")
+
+                # 订阅订单更新
+                sub_msg = {
+                    "op": "subscribe",
+                    "args": [{"channel": f"SPOT.ORDER.{symbol}"}],
+                }
+                await ws.send(json.dumps(sub_msg))
+                sub_resp = await ws.recv()
+                self.log.info(f"WS 订阅 {symbol}: {sub_resp}")
+
+                # 循环接收消息
+                while True:
+                    msg = await ws.recv()
+                    try:
+                        data = json.loads(msg)
+                        if data.get("action") == "push" and data.get("data"):
+                            for order in data["data"]:
+                                await on_message(order)
+                    except Exception as e:
+                        self.log.debug(f"WS 消息处理异常: {e}")
+
+        except Exception as e:
+            self.log.error(f"WebSocket 连接失败: {e}")

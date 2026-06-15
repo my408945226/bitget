@@ -3,6 +3,7 @@ import sys
 import time
 import signal
 import threading
+import asyncio
 import pickle
 import logging
 import os
@@ -169,6 +170,7 @@ class Strategy:
         self._lock = threading.RLock()
         self._running = True
         self._error_state = {}
+        self._ws_enabled = False
         signal.signal(signal.SIGINT, self._handle_exit)
 
     def _handle_exit(self, sig, frame):
@@ -187,11 +189,14 @@ class Strategy:
         """保存状态"""
         _save_state(self.state)
 
-    def _safe_cancel(self, ord_id: str):
-        """撤单（失败则记录，由调用者决定是否快速失败）"""
+    def _safe_cancel(self, ord_id: str) -> bool:
+        """撤单（订单不存在视为成功，其他失败才返回 False）"""
         try:
             resp = self.client.cancel(self.cfg.symbol, ord_id)
             if resp and resp.get("code") != "00000":
+                # 订单不存在（25204）视为成功（已被成交或撤销）
+                if resp.get("code") == "25204":
+                    return True
                 self.log.warning(f"撤单失败 {ord_id}: {resp.get('msg')}")
                 return False
             return True
@@ -325,7 +330,7 @@ class Strategy:
         self._save()
 
     def run(self):
-        """主循环（WS 事件驱动，定时对账为备选）"""
+        """主循环"""
         try:
             self.init()
         except SystemExit:
@@ -334,12 +339,19 @@ class Strategy:
             self.log.error(f"启动失败: {e}")
             sys.exit(1)
 
-        self.log.info("策略运行中（WS 驱动）...")
+        # 优先启动 WebSocket（实时推送）
+        if not self.dry_run:
+            self._start_ws_thread()
+
+        self.log.info("策略运行中...")
         while self._running:
             try:
                 if not self.dry_run:
-                    # 定时对账（防 WS 漏推送）
                     now = time.time()
+                    # WebSocket 失败时，降级到 REST 轮询
+                    if not self._ws_enabled:
+                        self._check_fills()
+                    # 定时对账（防漏推送，每 30s 一次）
                     if now - self.last_reconcile_ts >= self.RECONCILE_SEC:
                         self._reconcile()
                         self.last_reconcile_ts = now
@@ -378,8 +390,50 @@ class Strategy:
             pass
         return {}
 
+    def _start_ws_thread(self):
+        """启动 WebSocket 线程（优先级最高）"""
+        def ws_loop():
+            try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                loop.run_until_complete(self.client.ws_connect(self.cfg.symbol, self._on_ws_message))
+            except Exception as e:
+                self.log.warning(f"WebSocket 连接失败，降级到 REST 轮询: {e}")
+                self._ws_enabled = False
+
+        ws_thread = threading.Thread(target=ws_loop, daemon=True)
+        ws_thread.start()
+        self._ws_enabled = True
+        self.log.info("WebSocket 线程已启动")
+
+    async def _on_ws_message(self, order: dict):
+        """WebSocket 订单推送回调"""
+        if order.get("status") == "filled":
+            self.on_fill(order)
+
+    def _check_fills(self):
+        """检测订单成交（REST 轮询，WebSocket 失败时降级）"""
+        try:
+            open_orders = self.client.get_open_orders(self.cfg.symbol)
+            open_ids = {o.get("orderId") for o in open_orders}
+
+            sell_id = self.state.get("pending_sell_ord_id")
+            if sell_id and sell_id not in open_ids:
+                info = self.client.get_order_info(self.cfg.symbol, sell_id)
+                if info.get("orderStatus") == "filled":
+                    self.on_fill({"ordId": sell_id, "status": "filled", "avgPx": info.get("avgPrice")})
+
+            for oid in list(self.state.get("pending_buys", {}).keys()):
+                if oid not in open_ids:
+                    info = self.client.get_order_info(self.cfg.symbol, oid)
+                    if info.get("orderStatus") == "filled":
+                        self.on_fill({"ordId": oid, "status": "filled", "avgPx": info.get("avgPrice")})
+
+        except Exception as e:
+            self.log.debug(f"REST 轮询异常: {e}")
+
     def _reconcile(self):
-        """定时对账（每 30s）"""
+        """定时对账（每 30s）- 先检查漏推送，再修复差异"""
         # 防 race：最近 5s 内有成交或刷新，跳过
         now = time.time()
         time_since_refresh = now - self.last_refresh_ts
@@ -389,22 +443,25 @@ class Strategy:
             return
 
         try:
-            # ① 查询 OKX 实际持仓
+            # ① 优先检查 WS 漏推送（补救已成交但未通知的订单）
+            self._check_missed_fills()
+
+            # ② 查询交易所实际持仓
             okx_sz = self._get_okx_size()
 
-            # ② 计算本地预期持仓
+            # ③ 计算本地预期持仓
             opens = self.state.get("opens", 0)
             closes = self.state.get("closes", 0)
             local_sz = (opens - closes) * self.POSITION_SZ
 
-            # ③ 检测零头（部分成交但未完全对齐）
+            # ④ 检测零头（部分成交但未完全对齐）
             frac = okx_sz % self.POSITION_SZ
             if frac > 1e-9:
                 self.log.error(f"检测到零头: {frac:.4f}，需人工处理")
-                self._notify(f"⚠️ 零头告警: {frac:.4f}，请在 OKX 网页手动平仓")
+                self._notify(f"⚠️ 零头告警: {frac:.4f}，请在网页手动平仓")
                 return
 
-            # ④ 对比（容忍 < POSITION_SZ 的差异）
+            # ⑤ 对比（容忍 < POSITION_SZ 的差异）
             diff = okx_sz - local_sz
 
             if abs(diff) < self.POSITION_SZ - 1e-9:
@@ -412,26 +469,23 @@ class Strategy:
                 self._ensure_orders_complete()
                 return
 
-            # ⑤ 差异 >= 1 张，自动修复（OKX 为准）
+            # ⑥ 差异 >= 1 张，自动修复（交易所为准）
             if diff < 0:
-                # OKX < 本地：部分被平 → closes++
+                # 交易所 < 本地：部分被平 → closes++
                 n_closed = round(-diff / self.POSITION_SZ)
                 self.state["closes"] += n_closed
                 self.log.warning(f"对账修复(平): closes+{n_closed}")
-                self._notify(f"对账修复: 平仓 {n_closed} 张")
+                self._notify(f"对账: 平仓 {n_closed} 张")
 
             elif diff > 0:
-                # OKX > 本地：外部加仓 → opens++
+                # 交易所 > 本地：外部加仓 → opens++
                 n_added = round(diff / self.POSITION_SZ)
                 self.state["opens"] += n_added
                 self.log.warning(f"对账修复(加): opens+{n_added}")
-                self._notify(f"对账修复: 加仓 {n_added} 张")
+                self._notify(f"对账: 加仓 {n_added} 张")
 
             self._save()
             self._refresh_orders()
-
-            # ⑥ 检查漏推送
-            self._check_missed_fills()
 
         except Exception as e:
             self.log.warning(f"对账异常: {e}")
@@ -590,8 +644,17 @@ class Strategy:
         self._save()
 
     def _cycle_complete(self):
-        """一轮交易完成"""
-        self._notify("一轮做空完成")
+        """一轮交易完成 - 清理所有挂单后退出"""
+        # 撤销 SELL
+        sell_id = self.state.get("pending_sell_ord_id")
+        if sell_id:
+            self._safe_cancel(sell_id)
+
+        # 撤销所有 BUY
+        for oid in list(self.state.get("pending_buys", {}).keys()):
+            self._safe_cancel(oid)
+
+        # 清空本地状态
         self.state["stack_top"] = 0
         self.state["opens"] = 0
         self.state["closes"] = 0
@@ -599,6 +662,8 @@ class Strategy:
         self.state["pending_sell_px"] = None
         self.state["pending_buys"] = {}
         self._save()
+
+        self._notify("✅ 一轮做空完成，所有挂单已清理")
         sys.exit(0)
 
     def _refresh_orders(self):
