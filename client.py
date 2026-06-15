@@ -327,17 +327,17 @@ class BitgetClient:
                 auth_resp = await ws.recv()
                 self.log.debug(f"WS 认证响应: {auth_resp}")
 
-                # 订阅订单更新频道（Order-Channel）
+                # 订阅订单更新频道（Order-Channel + Fill-Channel）
                 sub_msg = {
                     "op": "subscribe",
                     "args": [
-                        {"channel": "orders", "instId": symbol},
-                        {"channel": "fills", "instId": symbol},
+                        {"instType": "USDT-FUTURES", "channel": "orders", "instId": symbol},
+                        {"instType": "USDT-FUTURES", "channel": "fills", "instId": symbol},
                     ],
                 }
                 await ws.send(json.dumps(sub_msg))
                 sub_resp = await ws.recv()
-                self.log.info(f"WS 订阅 {symbol} 成功: {sub_resp}")
+                self.log.info(f"WS 订阅 {symbol} 成功")
 
                 # 接收推送消息
                 while True:
