@@ -709,6 +709,27 @@ class Strategy:
 
             self._save()
 
+    def _margin_ratio_ok(self) -> bool:
+        """风控：保证金率 < 500% 时拦截新 SELL（equity / mmr < 5.0）"""
+        try:
+            acct = self.client.get_account()
+            equity = float(acct.get("data", [{}])[0].get("accountEquity") or 0)
+            mmr = 0.0
+            for p in self.client.get_position(self.cfg.symbol).get("data", []):
+                if p.get("holdSide") == "short":
+                    mmr = float(p.get("mmr") or p.get("marginRatio") or 0)
+                    break
+            if mmr <= 0:
+                return True  # 无维持保证金（无持仓/数据缺失）不拦截
+            ratio = equity / mmr
+            if ratio < 5.0:
+                self._notify(f"⚠️ 风控拦截加仓: 保证金率 {ratio*100:.0f}% < 500%")
+                return False
+            return True
+        except Exception as e:
+            self.log.warning(f"风控查询异常，放行: {e}")
+            return True
+
     def _place_sell(self, px: float):
         """挂SELL（原则：SELL 唯一，永远只有 1 个）"""
         # 强制检查：不能同时有 2 个 SELL
@@ -716,6 +737,10 @@ class Strategy:
         if old_sell_id:
             self.log.error(f"BUG: 检测到多个 SELL，old_id={old_sell_id}，立即退出")
             sys.exit(1)
+
+        # 风控闸门：保证金率 < 500% 不允许新增 SELL
+        if not self._margin_ratio_ok():
+            return
 
         try:
             resp = self.client.place_order(

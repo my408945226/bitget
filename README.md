@@ -382,61 +382,33 @@ python -m bitget_short_pyramid.strategy live \
 
 ## 🛡️ 风控系统
 
-### 双层风控架构
+### 加仓闸门：保证金率检查
 
-#### 第一层：保证金率检查
+**目的**：防止账户保证金率过低时继续加仓导致爆仓。
 
-**目的**：防止账户权益过低时继续加仓导致爆仓风险。
+**触发时机**：每次新增 SELL 单前（`_place_sell` 内）。
 
-**实现逻辑**：
+**逻辑**：
 ```python
-def _check_margin_ratio(self) -> bool:
-    """检查账户权益"""
-    account = self.client.get_account()
-    equity = float(account["data"][0].get("accountEquity", 0))
-    
-    if equity < 100:  # 账户权益 < 100 USDT
-        self.log.error(f"[风控] 账户权益 {equity:.2f} < 100 USDT，禁止加仓")
+def _margin_ratio_ok(self) -> bool:
+    """保证金率 < 500% 时拦截新 SELL（equity / mmr < 5.0）"""
+    equity = 账户权益(accountEquity)
+    mmr    = 当前空头持仓的维持保证金(mmr)
+    if mmr <= 0:            # 无持仓/数据缺失 → 放行
+        return True
+    ratio = equity / mmr
+    if ratio < 5.0:        # 低于 500% → 拦截
+        notify("⚠️ 风控拦截加仓: 保证金率 xxx% < 500%")
         return False
     return True
 ```
 
-**触发时机**：
-- 每次挂 SELL postOnly 单前
-- 每次市价加仓前
+**行为**：
+- 保证金率 ≥ 500% → 正常挂 SELL
+- 保证金率 < 500% → **跳过本次加仓**（不退出策略，BUY 平仓网格继续运行，等价格回落平仓后保证金率回升）
+- 查询异常 → 放行（不因查询失败误杀，由 60s 对账和 monitor 兜底）
 
-**注意**：Bitget UTA v3 API 无直接 `marginRatio` 字段，当前用账户权益作为代理指标。如需更精确的风控，可扩展解析账户资产详情。
-
-#### 第二层：单笔持仓限额
-
-**目的**：防止单次下单过大，分散风险。
-
-**计算公式**：
-```
-单笔名义价值 = 每单张数 × 当前价格
-
-例如：
-  size = 100 张
-  price = 50 USDT
-  notional = 100 × 50 = 5000 USDT
-  
-  如果 max_notional_usdt = 10000，则允许下单
-  如果 max_notional_usdt = 3000，则拒绝下单
-```
-
-**代码实现**：
-```python
-def _check_position_limit(self, current_price: float) -> bool:
-    """检查单笔持仓名义价值"""
-    notional = self.POSITION_SZ * current_price
-    if notional > self.cfg.max_notional_usdt:
-        self.log.error(
-            f"[风控] 单笔价值 {notional:.2f} > "
-            f"{self.cfg.max_notional_usdt} USDT，禁止加仓"
-        )
-        return False
-    return True
-```
+> 与独立的 [monitor.py](monitor.py) 配合：monitor 负责事后 Telegram 告警，本闸门负责**下单前拦截**，双重防护。
 
 ### 其他安全机制
 
