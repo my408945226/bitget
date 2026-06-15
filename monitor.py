@@ -69,8 +69,11 @@ class AccountMonitor:
             self.log.info("监控启动")
             self._send_msg("监控启动")
 
+            count = 0
             while True:
                 try:
+                    count += 1
+                    self.log.info(f"[{count}] 扫描中...")
                     self.tick()
                 except Exception as e:
                     self.log.error(f"tick 失败: {e}", exc_info=True)
@@ -97,8 +100,11 @@ class AccountMonitor:
             if positions:
                 mmr = float(positions[0].get("mmr", 0))
                 mgn_ratio = equity / mmr if mmr > 0 else float('inf')
+                self.log.debug(f"保证金率: {mgn_ratio*100:.1f}% | 权益: {equity:.2f}")
                 self._check_alerts(equity, mgn_ratio)
                 self._maybe_heartbeat(equity, mgn_ratio)
+            else:
+                self.log.debug(f"无持仓 | 权益: {equity:.2f}")
         except Exception as e:
             self.log.error(f"tick 异常: {e}", exc_info=True)
 
