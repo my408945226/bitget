@@ -1,24 +1,13 @@
-"""账户监控器 - 保证金率告警（WebSocket 实时推送）"""
+"""账户监控器 - 保证金率告警"""
 import time
 import os
 import logging
-import threading
-import asyncio
-import json
-import hashlib
-import hmac
-import base64
 from datetime import datetime
 
 try:
     import requests
 except ImportError:
     requests = None
-
-try:
-    import websockets
-except ImportError:
-    websockets = None
 
 from config import parse_monitor_args
 from client import BitgetClient
@@ -73,8 +62,6 @@ class AccountMonitor:
         self._last_alerts = {}
         self._start_ts = time.time()
         self._last_heartbeat = 0.0
-        self._ws_enabled = False
-        self._running = True
 
     def run(self):
         """主循环"""
@@ -82,19 +69,13 @@ class AccountMonitor:
             self.log.info("监控启动")
             self._send_msg("监控启动")
 
-            # 优先启动 WebSocket（实时推送）
-            self._start_ws_thread()
-
-            while self._running:
+            while True:
                 try:
-                    # WebSocket 失败时，降级到 REST 轮询
-                    if not self._ws_enabled:
-                        self.tick()
+                    self.tick()
                 except Exception as e:
                     self.log.error(f"tick 失败: {e}", exc_info=True)
                 time.sleep(60)
         except KeyboardInterrupt:
-            self._running = False
             self.log.info("监控已停止")
 
     def tick(self):
@@ -153,90 +134,6 @@ class AccountMonitor:
         """发送 Telegram"""
         if self.cfg.tg_bot_token:
             _send_telegram(f"账户监控\n{msg}", self.cfg.tg_bot_token, self.cfg.tg_chat_id)
-
-    def _start_ws_thread(self):
-        """启动 WebSocket 线程（优先级最高）"""
-        if not websockets:
-            self.log.warning("websockets 库未安装，降级到 REST 轮询")
-            return
-
-        def ws_loop():
-            try:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                loop.run_until_complete(self._ws_connect())
-            except Exception as e:
-                self.log.warning(f"WebSocket 连接失败，降级到 REST 轮询: {e}")
-                self._ws_enabled = False
-
-        ws_thread = threading.Thread(target=ws_loop, daemon=True)
-        ws_thread.start()
-        self._ws_enabled = True
-        self.log.info("WebSocket 线程已启动")
-
-    async def _ws_connect(self):
-        """连接 WebSocket 并订阅账户更新
-        https://www.bitget.com/zh-CN/api-doc/contract/websocket/private/Account-Channel
-        """
-        url = "wss://ws.bitget.com/mix/v1/private/stream"
-        ts = str(int(time.time() * 1000))
-        sign = self._ws_sign(ts)
-
-        async with websockets.connect(url) as ws:
-            # 认证
-            auth_msg = {
-                "op": "login",
-                "args": {
-                    "accessKey": self.cfg.api_key,
-                    "accessSign": sign,
-                    "timestamp": ts,
-                    "passphrase": self.cfg.passphrase,
-                },
-            }
-            await ws.send(json.dumps(auth_msg))
-            auth_resp = await ws.recv()
-            self.log.debug(f"WS 认证: {auth_resp}")
-
-            # 订阅账户更新（Account-Channel）
-            sub_msg = {
-                "op": "subscribe",
-                "args": [{"channel": "account"}],
-            }
-            await ws.send(json.dumps(sub_msg))
-            sub_resp = await ws.recv()
-            self.log.info(f"WS 订阅账户频道成功")
-
-            # 接收推送
-            while self._running:
-                msg = await ws.recv()
-                try:
-                    data = json.loads(msg)
-                    if data.get("action") == "snapshot" or data.get("action") == "update":
-                        for item in data.get("data", []):
-                            self._on_account_update(item)
-                except Exception as e:
-                    self.log.debug(f"WS 消息处理异常: {e}")
-
-    def _ws_sign(self, ts: str) -> str:
-        """生成 WebSocket 认证签名"""
-        pre_hash = ts + "GET" + "/user/verify"
-        mac = hmac.new(
-            self.cfg.secret_key.encode("utf-8"),
-            pre_hash.encode("utf-8"),
-            hashlib.sha256,
-        )
-        return base64.b64encode(mac.digest()).decode("utf-8")
-
-    def _on_account_update(self, data: dict):
-        """WebSocket 账户更新回调"""
-        try:
-            equity = float(data.get("usdtEquity") or 0)
-            mmr = float(data.get("mmr") or 0)
-            mgn_ratio = equity / mmr if mmr > 0 else float('inf')
-            self._check_alerts(equity, mgn_ratio)
-            self._maybe_heartbeat(equity, mgn_ratio)
-        except Exception as e:
-            self.log.debug(f"账户更新处理异常: {e}")
 
 
 def main():
