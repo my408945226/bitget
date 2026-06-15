@@ -218,16 +218,7 @@ class Strategy:
                 self.log.error(f"设置单向持仓失败: {resp.get('msg')}")
                 return False
 
-            # ③ 杠杆一致性检查（有持仓时必须 = 3x）
-            positions = self.client.get_position(self.cfg.symbol).get("data", [])
-            for p in positions:
-                if float(p.get("total", 0)) != 0:
-                    lever = float(p.get("lever", 0))
-                    if abs(lever - 3) > 0.1:
-                        self.log.error(f"杠杆不一致: {lever}，需要 3x")
-                        return False
-
-            # ④ 无持仓时设置杠杆 3x
+            # ③ 设置杠杆 3x（无论是否有持仓都设置）
             resp = self.client.set_leverage(self.cfg.symbol, 3)
             if resp.get("code") != "00000":
                 self.log.error(f"设杠杆失败: {resp.get('msg')}")

@@ -174,6 +174,7 @@ class BitgetClient:
                 "unrealizedPL": p.get("unrealisedPnl") or p.get("unrealizedPL", "0"),
                 "marginRatio": p.get("mmr") or p.get("marginRatio", "0"),
                 "total": p.get("pos") or p.get("total", "0"),
+                "lever": float(p.get("leverage") or 0),
             }
             converted.append(item)
         return {
