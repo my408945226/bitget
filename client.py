@@ -300,18 +300,18 @@ class BitgetClient:
         return self.api_key, sign, ts, self.passphrase
 
     async def ws_connect(self, symbol: str, on_message):
-        """连接 WebSocket 并订阅订单更新
-        symbol: 交易对（如 BGBUSDT）
-        on_message: 回调函数，接收订单数据
+        """连接 WebSocket 并订阅订单更新（Order-Channel）
+        https://www.bitget.com/zh-CN/api-doc/contract/websocket/private/Order-Channel
+        https://www.bitget.com/zh-CN/api-doc/contract/websocket/private/Fill-Channel
         """
         if not websockets:
-            self.log.warning("websockets 库未安装，WebSocket 功能禁用")
+            self.log.warning("websockets 库未安装，降级到 REST 轮询")
             return
 
         try:
-            url = "wss://stream.bitget.com/public/spot/stream"
+            url = "wss://ws.bitget.com/mix/v1/private/stream"
             async with websockets.connect(url) as ws:
-                # 发送认证
+                # 发送认证（带签名）
                 ts = str(int(time.time() * 1000))
                 access_key, access_sign, timestamp, passphrase = self._ws_auth_sign(ts)
                 auth_msg = {
@@ -327,25 +327,28 @@ class BitgetClient:
                 auth_resp = await ws.recv()
                 self.log.debug(f"WS 认证响应: {auth_resp}")
 
-                # 订阅订单更新
+                # 订阅订单更新频道（Order-Channel）
                 sub_msg = {
                     "op": "subscribe",
-                    "args": [{"channel": f"SPOT.ORDER.{symbol}"}],
+                    "args": [
+                        {"channel": "orders", "instId": symbol},
+                        {"channel": "fills", "instId": symbol},
+                    ],
                 }
                 await ws.send(json.dumps(sub_msg))
                 sub_resp = await ws.recv()
-                self.log.info(f"WS 订阅 {symbol}: {sub_resp}")
+                self.log.info(f"WS 订阅 {symbol} 成功: {sub_resp}")
 
-                # 循环接收消息
+                # 接收推送消息
                 while True:
                     msg = await ws.recv()
                     try:
                         data = json.loads(msg)
-                        if data.get("action") == "push" and data.get("data"):
-                            for order in data["data"]:
-                                await on_message(order)
+                        if data.get("action") == "snapshot" or data.get("action") == "update":
+                            for item in data.get("data", []):
+                                await on_message(item)
                     except Exception as e:
                         self.log.debug(f"WS 消息处理异常: {e}")
 
         except Exception as e:
-            self.log.error(f"WebSocket 连接失败: {e}")
+            self.log.warning(f"WebSocket 连接失败，降级到 REST 轮询: {e}")

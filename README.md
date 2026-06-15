@@ -36,8 +36,10 @@
 
 ### 🛡️ 生产级稳定性
 
-- ✅ **启动清理挂单** - 6 阶段启动流程，自动撤销交易所遗留订单
-- ✅ **成交检测优化** - 先批量查挂单列表，仅对消失订单查详情，API 调用减少 80%
+- ✅ **WebSocket 实时推送** - Order-Channel + Fill-Channel 毫秒级推送成交事件
+- ✅ **双层防线** - WebSocket（实时）+ 定时对账（每 60s 防漏）
+- ✅ **启动清理挂单** - 自动撤销交易所遗留订单，防止重复挂单
+- ✅ **逻辑简洁** - 只保留核心逻辑，降低出错风险
 - ✅ **跨平台文件锁** - Windows (msvcrt) / Linux/Mac (fcntl) 自动适配
 - ✅ **异常容错** - 网络抖动、API 限流、行情中断时自动恢复
 
@@ -92,17 +94,20 @@ BUY₃ @ 94.12   （第 3 档平仓）
   │   └─ --adopt-sell-px: 基准价起仓
   └─ 挂初始网格（SELL + BUY 梯队）
 
-主循环 (run)
-  每 --interval 秒一次
-  │
-  ├─ 检查订单成交（_check_fills）
-  │   ├─ SELL 成交 → stack_top 更新 → opens++ → 重挂网格
-  │   └─ BUY 成交 → closes++ → 清除所有 BUY → 重挂梯队
-  │
-  └─ 定时对账（每 30s 一次）
-      ├─ 查询交易所实际持仓
-      ├─ 对比本地 opens/closes
-      └─ 不一致 → 自动修复 + 重挂网格
+主循环 (run) - 双层防线
+  
+  第 1 层：WebSocket（实时推送，后台线程）
+    ├─ Order-Channel + Fill-Channel 订阅
+    └─ 毫秒级推送成交事件
+    
+  第 2 层：定时对账（每 60s，防漏推送）
+    ├─ 查询交易所实际持仓
+    ├─ 对比本地 opens/closes
+    └─ 不一致 → 自动修复 + 重挂网格
+  
+  成交处理流程
+  ├─ SELL 成交 → stack_top 更新 → opens++ → 重挂网格
+  └─ BUY 成交 → closes++ → 清除所有 BUY → 重挂梯队
 ```
 
 ---
@@ -113,7 +118,11 @@ BUY₃ @ 94.12   （第 3 档平仓）
 
 - **Python**: 3.11+
 - **操作系统**: Windows / Linux / macOS
-- **网络**: 能稳定访问 Bitget API
+- **网络**: 能稳定访问 Bitget API（REST + WebSocket）
+- **依赖包**: 
+  - `requests` - REST API 请求
+  - `websockets` - WebSocket 实时推送（推荐）
+  - `python-dotenv` - 环境变量配置
 
 ### 2. 安装依赖
 
@@ -782,6 +791,8 @@ README.md            # 本文档
 
 ### Bitget UTA v3 API 速查
 
+#### REST API
+
 | 操作 | 接口 | 文档链接 |
 |------|------|---------|
 | 下单 | `POST /api/v3/trade/place-order` | [官方文档](https://www.bitget.com/zh-CN/api-doc/uta/trade/place-order) |
@@ -791,6 +802,19 @@ README.md            # 本文档
 | 行情 | `GET /api/v3/market/tickers` | [官方文档](https://www.bitget.com/zh-CN/api-doc/uta/market/tickers) |
 | 持仓 | `GET /api/v3/position/current-position` | [官方文档](https://www.bitget.com/zh-CN/api-doc/uta/position/current-position) |
 | 资产 | `GET /api/v3/account/assets` | [官方文档](https://www.bitget.com/zh-CN/api-doc/uta/account/assets) |
+
+#### WebSocket（实时推送，优先级最高）
+
+| 频道 | 用途 | 文档链接 |
+|------|------|---------|
+| Order-Channel | 订单状态更新 | [官方文档](https://www.bitget.com/zh-CN/api-doc/contract/websocket/private/Order-Channel) |
+| Fill-Channel | 成交推送 | [官方文档](https://www.bitget.com/zh-CN/api-doc/contract/websocket/private/Fill-Channel) |
+| Positions-Channel | 持仓更新 | [官方文档](https://www.bitget.com/zh-CN/api-doc/contract/websocket/private/Positions-Channel) |
+
+**WebSocket 连接**：
+- URL: `wss://ws.bitget.com/mix/v1/private/stream`
+- 认证：签名方式（详见官方文档）
+- 降级：WebSocket 连接失败时自动降级到 REST 轮询
 
 ---
 
@@ -815,5 +839,5 @@ MIT License
 
 ---
 
-**最后更新时间**：2026-06-14  
-**版本**：v2.1.0（三种起仓模式 + 定时对账 + 代码精简）
+**最后更新时间**：2026-06-15  
+**版本**：v2.3.0（WebSocket 实时推送 + 60s 定时对账 + 逻辑简洁）

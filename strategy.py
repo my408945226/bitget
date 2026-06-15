@@ -163,14 +163,13 @@ class Strategy:
         self.GRID_PCT = cfg.grid_pct
         self.POSITION_SZ = cfg.size
         self.MAX_BUYS = 60
-        self.RECONCILE_SEC = 30
+        self.RECONCILE_SEC = 60
         self.contract_info: dict = {}
         self.last_reconcile_ts = 0.0
         self.last_refresh_ts = 0.0
         self._lock = threading.RLock()
         self._running = True
         self._error_state = {}
-        self._ws_enabled = False
         signal.signal(signal.SIGINT, self._handle_exit)
 
     def _handle_exit(self, sig, frame):
@@ -330,7 +329,7 @@ class Strategy:
             self.log.error(f"启动失败: {e}")
             sys.exit(1)
 
-        # 优先启动 WebSocket（实时推送）
+        # 启动 WebSocket（实时推送）
         if not self.dry_run:
             self._start_ws_thread()
 
@@ -339,10 +338,7 @@ class Strategy:
             try:
                 if not self.dry_run:
                     now = time.time()
-                    # WebSocket 失败时，降级到 REST 轮询
-                    if not self._ws_enabled:
-                        self._check_fills()
-                    # 定时对账（防漏推送，每 30s 一次）
+                    # 定时对账（防漏推送，每 60s 一次）
                     if now - self.last_reconcile_ts >= self.RECONCILE_SEC:
                         self._reconcile()
                         self.last_reconcile_ts = now
@@ -382,46 +378,23 @@ class Strategy:
         return {}
 
     def _start_ws_thread(self):
-        """启动 WebSocket 线程（优先级最高）"""
+        """启动 WebSocket 线程（实时推送）"""
         def ws_loop():
             try:
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
                 loop.run_until_complete(self.client.ws_connect(self.cfg.symbol, self._on_ws_message))
             except Exception as e:
-                self.log.warning(f"WebSocket 连接失败，降级到 REST 轮询: {e}")
-                self._ws_enabled = False
+                self.log.warning(f"WebSocket 连接失败: {e}，依赖定时对账防护")
 
         ws_thread = threading.Thread(target=ws_loop, daemon=True)
         ws_thread.start()
-        self._ws_enabled = True
         self.log.info("WebSocket 线程已启动")
 
     async def _on_ws_message(self, order: dict):
         """WebSocket 订单推送回调"""
         if order.get("status") == "filled":
             self.on_fill(order)
-
-    def _check_fills(self):
-        """检测订单成交（REST 轮询，WebSocket 失败时降级）"""
-        try:
-            open_orders = self.client.get_open_orders(self.cfg.symbol)
-            open_ids = {o.get("orderId") for o in open_orders}
-
-            sell_id = self.state.get("pending_sell_ord_id")
-            if sell_id and sell_id not in open_ids:
-                info = self.client.get_order_info(self.cfg.symbol, sell_id)
-                if info.get("orderStatus") == "filled":
-                    self.on_fill({"ordId": sell_id, "status": "filled", "avgPx": info.get("avgPrice")})
-
-            for oid in list(self.state.get("pending_buys", {}).keys()):
-                if oid not in open_ids:
-                    info = self.client.get_order_info(self.cfg.symbol, oid)
-                    if info.get("orderStatus") == "filled":
-                        self.on_fill({"ordId": oid, "status": "filled", "avgPx": info.get("avgPrice")})
-
-        except Exception as e:
-            self.log.debug(f"REST 轮询异常: {e}")
 
     def _reconcile(self):
         """定时对账（每 30s）- 先检查漏推送，再修复差异"""
