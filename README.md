@@ -807,14 +807,72 @@ README.md            # 本文档
 
 | 频道 | 用途 | 文档链接 |
 |------|------|---------|
-| Order-Channel | 订单状态更新 | [官方文档](https://www.bitget.com/zh-CN/api-doc/contract/websocket/private/Order-Channel) |
-| Fill-Channel | 成交推送 | [官方文档](https://www.bitget.com/zh-CN/api-doc/contract/websocket/private/Fill-Channel) |
+| Order-Channel | 订单状态更新（本策略使用） | [官方文档](https://www.bitget.com/zh-CN/api-doc/contract/websocket/private/Order-Channel) |
+| Fill-Channel | 成交明细 | [官方文档](https://www.bitget.com/zh-CN/api-doc/contract/websocket/private/Fill-Channel) |
 | Positions-Channel | 持仓更新 | [官方文档](https://www.bitget.com/zh-CN/api-doc/contract/websocket/private/Positions-Channel) |
 
-**WebSocket 连接**：
-- URL: `wss://ws.bitget.com/mix/v1/private/stream`
-- 认证：签名方式（详见官方文档）
-- 降级：WebSocket 连接失败时自动降级到 REST 轮询
+**连接信息**（已验证，记录于此避免重复查询）：
+
+```
+私有频道 URL: wss://ws.bitget.com/v2/ws/private
+心跳: 每 30s 发送字符串 "ping"，服务端回 "pong"（2 分钟无 ping 断连）
+限速: 每秒最多 10 条消息
+```
+
+**① 登录认证**（`op=login`，`args` 为**数组**）：
+```json
+{
+  "op": "login",
+  "args": [{
+    "apiKey": "<api_key>",
+    "passphrase": "<passphrase>",
+    "timestamp": "<unix_秒>",
+    "sign": "Base64(HMAC_SHA256(secretKey, timestamp + 'GET' + '/user/verify'))"
+  }]
+}
+```
+> 注意：签名用 **GET + /user/verify**，timestamp 为**秒**（30s 过期）。
+
+**② 订阅订单频道**（`op=subscribe`，`args` 为**数组**）：
+```json
+{
+  "op": "subscribe",
+  "args": [{"instType": "USDT-FUTURES", "channel": "orders", "instId": "BGBUSDT"}]
+}
+```
+> `instId` 可为具体交易对或 `"default"`（全部）。订阅成功响应为 `{"event":"subscribe","arg":{...}}`。
+
+**③ 推送数据结构**（`action`=snapshot/update）：
+```json
+{
+  "action": "snapshot",
+  "arg": {"instType": "USDT-FUTURES", "channel": "orders", "instId": "default"},
+  "data": [{
+    "orderId": "133...",
+    "clientOid": "...",
+    "status": "filled",
+    "side": "buy",
+    "price": "3000",
+    "size": "0.4",
+    "priceAvg": "3000",
+    "accBaseVolume": "0.4",
+    "fillPrice": "",
+    "uTime": "1760461517274"
+  }],
+  "ts": 1760461517285
+}
+```
+
+**关键字段映射**（Bitget → 本策略 on_fill）：
+
+| Bitget 字段 | 本策略字段 | 说明 |
+|------|------|------|
+| `orderId` | `ordId` | 订单 ID |
+| `status` | `status` | `filled`/`canceled`（注意单 l）/`partially_filled`/`live` |
+| `priceAvg` | `avgPx` | 成交均价 |
+| `accBaseVolume` | `accFillSz` | 累计成交数量 |
+
+**降级**：WebSocket 连接失败时自动降级到每 60s 定时对账。
 
 ---
 
@@ -840,4 +898,4 @@ MIT License
 ---
 
 **最后更新时间**：2026-06-15  
-**版本**：v2.3.0（WebSocket 实时推送 + 60s 定时对账 + 逻辑简洁）
+**版本**：v2.4.0（修正 WebSocket V2 私有频道：正确 URL + login 格式 + 心跳 + 字段映射）

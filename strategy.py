@@ -391,13 +391,21 @@ class Strategy:
         ws_thread.start()
         self.log.info("WebSocket 线程已启动")
 
-    async def _on_ws_message(self, order: dict):
-        """WebSocket 订单推送回调"""
-        if order.get("status") == "filled":
-            self.on_fill(order)
+    async def _on_ws_message(self, push: dict):
+        """WebSocket 订单推送回调（归一化 Bitget 字段 → on_fill 格式）"""
+        status = push.get("status")  # live / partially_filled / filled / canceled
+        if status not in ("filled", "canceled"):
+            return
+        order = {
+            "ordId": push.get("orderId"),
+            "status": "filled" if status == "filled" else "cancelled",
+            "avgPx": push.get("priceAvg") or push.get("fillPrice") or 0,
+            "accFillSz": push.get("accBaseVolume") or push.get("baseVolume") or 0,
+        }
+        self.on_fill(order)
 
     def _reconcile(self):
-        """定时对账（每 30s）- 先检查漏推送，再修复差异"""
+        """定时对账（每 60s）- 先检查漏推送，再修复差异"""
         # 防 race：最近 5s 内有成交或刷新，跳过
         now = time.time()
         time_since_refresh = now - self.last_refresh_ts

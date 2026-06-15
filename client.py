@@ -14,6 +14,7 @@ import hmac
 import base64
 import json
 import time
+import asyncio
 import logging
 import string
 import random
@@ -285,70 +286,80 @@ class BitgetClient:
         return data
 
     # ====== WebSocket 方法 ======
+    # 私有频道 URL（V2）: wss://ws.bitget.com/v2/ws/private
+    # 登录签名: Base64(HMAC_SHA256(secretKey, timestamp + "GET" + "/user/verify"))
 
-    def _ws_auth_sign(self, ts: str) -> tuple:
-        """生成 WebSocket 认证签名
-        返回 (accessKey, accessSign, accessTimestamp, accessPassphrase)
-        """
+    WS_PRIVATE_URL = "wss://ws.bitget.com/v2/ws/private"
+
+    def _ws_login_sign(self, ts: str) -> str:
+        """生成 WebSocket 登录签名"""
         pre_hash = ts + "GET" + "/user/verify"
         mac = hmac.new(
             self.secret_key.encode("utf-8"),
             pre_hash.encode("utf-8"),
             hashlib.sha256,
         )
-        sign = base64.b64encode(mac.digest()).decode("utf-8")
-        return self.api_key, sign, ts, self.passphrase
+        return base64.b64encode(mac.digest()).decode("utf-8")
 
     async def ws_connect(self, symbol: str, on_message):
-        """连接 WebSocket 并订阅订单更新（Order-Channel）
+        """连接 WebSocket 并订阅订单频道（Order-Channel）
         https://www.bitget.com/zh-CN/api-doc/contract/websocket/private/Order-Channel
-        https://www.bitget.com/zh-CN/api-doc/contract/websocket/private/Fill-Channel
+        on_message: async 回调，接收单个订单 dict（已含 status/orderId/priceAvg 等）
         """
         if not websockets:
             self.log.warning("websockets 库未安装，降级到 REST 轮询")
             return
 
         try:
-            url = "wss://ws.bitget.com/mix/v1/private/stream"
-            async with websockets.connect(url) as ws:
-                # 发送认证（带签名）
-                ts = str(int(time.time() * 1000))
-                access_key, access_sign, timestamp, passphrase = self._ws_auth_sign(ts)
-                auth_msg = {
+            async with websockets.connect(self.WS_PRIVATE_URL) as ws:
+                # ① 登录认证（op=login, args 为数组）
+                ts = str(int(time.time()))
+                login_msg = {
                     "op": "login",
-                    "args": {
-                        "accessKey": access_key,
-                        "accessSign": access_sign,
-                        "timestamp": timestamp,
-                        "passphrase": passphrase,
-                    },
+                    "args": [{
+                        "apiKey": self.api_key,
+                        "passphrase": self.passphrase,
+                        "timestamp": ts,
+                        "sign": self._ws_login_sign(ts),
+                    }],
                 }
-                await ws.send(json.dumps(auth_msg))
-                auth_resp = await ws.recv()
-                self.log.debug(f"WS 认证响应: {auth_resp}")
+                await ws.send(json.dumps(login_msg))
+                login_resp = await ws.recv()
+                self.log.debug(f"WS 登录: {login_resp}")
 
-                # 订阅订单更新频道（Order-Channel + Fill-Channel）
+                # ② 订阅订单频道（op=subscribe, args 为数组）
                 sub_msg = {
                     "op": "subscribe",
-                    "args": [
-                        {"instType": "USDT-FUTURES", "channel": "orders", "instId": symbol},
-                        {"instType": "USDT-FUTURES", "channel": "fills", "instId": symbol},
-                    ],
+                    "args": [{"instType": "USDT-FUTURES", "channel": "orders", "instId": symbol}],
                 }
                 await ws.send(json.dumps(sub_msg))
-                sub_resp = await ws.recv()
-                self.log.info(f"WS 订阅 {symbol} 成功")
+                self.log.info(f"WS 订阅 {symbol} orders")
 
-                # 接收推送消息
-                while True:
-                    msg = await ws.recv()
-                    try:
-                        data = json.loads(msg)
-                        if data.get("action") == "snapshot" or data.get("action") == "update":
-                            for item in data.get("data", []):
-                                await on_message(item)
-                    except Exception as e:
-                        self.log.debug(f"WS 消息处理异常: {e}")
+                # ③ 心跳协程：每 30s 发送 ping
+                async def _heartbeat():
+                    while True:
+                        await asyncio.sleep(30)
+                        await ws.send("ping")
+
+                hb_task = asyncio.create_task(_heartbeat())
+                try:
+                    # ④ 接收推送
+                    async for msg in ws:
+                        if msg == "pong":
+                            continue
+                        try:
+                            data = json.loads(msg)
+                        except (ValueError, TypeError):
+                            continue
+                        # 仅处理 orders 频道的快照/更新推送
+                        if data.get("arg", {}).get("channel") != "orders":
+                            continue
+                        if data.get("action") not in ("snapshot", "update"):
+                            continue
+                        for item in data.get("data", []):
+                            await on_message(item)
+                finally:
+                    hb_task.cancel()
 
         except Exception as e:
             self.log.warning(f"WebSocket 连接失败，降级到 REST 轮询: {e}")
