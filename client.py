@@ -142,38 +142,49 @@ class BitgetClient:
     # ====== 私密接口：账户 ======
 
     def get_account(self, margin_coin: str = "USDT") -> dict:
-        """GET /api/v2/mix/account/accounts - 合约账户列表（联合保证金 union）
+        """GET /api/v3/account/assets - 统一账户(UTA)资产
 
-        v3 的 /account/assets 对联合保证金账户顶层 accountEquity 返回 0，
-        故改用 v2 合约账户接口，含真实 accountEquity / crossedMargin（维持保证金）。
+        UTA 统一账户禁用 v2 经典接口（40085），故用 v3。账户级权益按数值择优
+        （accountEquity → usdtEquity → effEquity），避免某一字段为 0 时误判。
         """
-        path = "/api/v2/mix/account/accounts"
-        params = {"productType": "USDT-FUTURES"}
-        resp = self._get(path, params, private=True)
+        path = "/api/v3/account/assets"
+        resp = self._get(path, {}, private=True)
         if resp.get("code") != "00000":
             return {}
+        data = resp.get("data") or {}
+        if isinstance(data, list):
+            data = data[0] if data else {}
 
-        accounts = resp.get("data") or []
-        acct = {}
-        for a in accounts:
-            if str(a.get("marginCoin", "")).upper() == margin_coin.upper():
-                acct = a
+        def _f(key):
+            try:
+                return float(data.get(key) or 0)
+            except (TypeError, ValueError):
+                return 0.0
+
+        # 账户总权益：按数值择优（"0" 是真值，不能用 or 回退）
+        equity = _f("accountEquity") or _f("usdtEquity") or _f("effEquity")
+
+        # USDT 可用余额
+        available = "0"
+        for asset in data.get("assets") or []:
+            if str(asset.get("coin", "")).upper() == margin_coin.upper():
+                available = asset.get("available", "0")
                 break
-        if not acct and accounts:
-            acct = accounts[0]
 
-        equity = acct.get("accountEquity") or acct.get("usdtEquity") or "0"
-        if not equity or float(equity or 0) == 0:
-            self.log.warning(f"账户权益为 0，原始字段: {list(acct.keys())}")
+        if equity == 0:
+            self.log.warning(
+                f"账户权益为 0 — accountEquity={data.get('accountEquity')} "
+                f"usdtEquity={data.get('usdtEquity')} effEquity={data.get('effEquity')} "
+                f"mmr={data.get('mmr')} mgnRatio={data.get('mgnRatio')}")
 
         return {
             "code": "00000",
             "data": [{
-                "available": acct.get("available", "0"),
-                "accountEquity": equity,
-                "usdtEquity": acct.get("usdtEquity", "0"),
-                "mmr": acct.get("crossedMargin", "0"),          # 全仓维持保证金
-                "crossedRiskRate": acct.get("crossedRiskRate", "0"),
+                "available": available,
+                "accountEquity": str(equity),
+                "usdtEquity": data.get("usdtEquity", "0"),
+                "mmr": data.get("mmr", "0"),
+                "mgnRatio": data.get("mgnRatio", "0"),
             }]
         }
 
