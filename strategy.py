@@ -157,13 +157,18 @@ class Strategy:
     def __init__(self, cfg: Config):
         self.cfg = cfg
         self.log = _setup_logger(cfg.symbol)
-        self.dry_run = cfg.mode == "dry-run"
-        self.client = BitgetClient(cfg.api_key, cfg.secret_key, cfg.passphrase, self.log, dry_run=self.dry_run)
+        self.client = BitgetClient(cfg.api_key, cfg.secret_key, cfg.passphrase, self.log)
         self.state: State = _load_state(cfg.symbol)
         self.GRID_PCT = cfg.grid_pct
         self.POSITION_SZ = cfg.size
         self.MAX_BUYS = 60
         self.RECONCILE_SEC = 60
+        # BUY 重挂退避：同价位窗口内被系统撤 ≥N 次 → 退避一段时间不挂
+        self.BUY_CANCEL_BACKOFF_N = 3
+        self.BUY_CANCEL_WINDOW_SEC = 120
+        self.BUY_CANCEL_BACKOFF_SEC = 180
+        self._buy_cancel_hits = {}   # px_key -> [被撤时间戳]
+        self._buy_backoff = {}       # px_key -> 退避截止时间
         self.contract_info: dict = {}
         self.last_reconcile_ts = 0.0
         self.last_refresh_ts = 0.0
@@ -181,7 +186,7 @@ class Strategy:
     def _notify(self, msg: str):
         """发送通知"""
         self.log.info(msg)
-        if not self.dry_run and self.cfg.tg_bot_token:
+        if self.cfg.tg_bot_token:
             _send_telegram(f"<b>{self.cfg.symbol}</b>\n{msg}", self.cfg.tg_bot_token, self.cfg.tg_chat_id)
 
     def _save(self):
@@ -242,15 +247,13 @@ class Strategy:
 
     def init(self):
         """初始化"""
-        mode = "DRY" if self.dry_run else "LIVE"
-        self.log.info(f"=== 初始化 {self.cfg.symbol} [{mode}] ===")
+        self.log.info(f"=== 初始化 {self.cfg.symbol} [LIVE] ===")
 
         self.contract_info = self.client.get_contracts(self.cfg.symbol) or {}
 
-        if not self.dry_run:
-            if not self._check_account_config():
-                sys.exit(1)
-            self._cancel_stale_pending_on_startup()
+        if not self._check_account_config():
+            sys.exit(1)
+        self._cancel_stale_pending_on_startup()
 
         # 接管或起仓
         if not self._adopt_position():
@@ -265,8 +268,6 @@ class Strategy:
 
     def _adopt_position(self) -> bool:
         """接管持仓"""
-        if self.dry_run:
-            return False
         try:
             for p in self.client.get_position(self.cfg.symbol).get("data", []):
                 if p.get("holdSide") == "short":
@@ -283,7 +284,7 @@ class Strategy:
         return False
 
     def _open(self):
-        """起仓"""
+        """起仓（三种模式，与加仓共用 _can_open_sell；起仓被拒 → 停策略）"""
         if self.cfg.adopt_sell_px > 0:
             base_px = self.cfg.adopt_sell_px
             sell_px = self._round_px(base_px * (1 + self.GRID_PCT))
@@ -292,20 +293,29 @@ class Strategy:
             sell_px = self.cfg.initial_sell_px
             self.state["stack_top"] = sell_px
         else:
+            # 市价起仓：先取价过风控，再下单
+            px = self.client.get_price(self.cfg.symbol)
+            if px <= 0:
+                self.log.error("无法获取市价")
+                sys.exit(1)
+            if not self._can_open_sell(px):
+                self.log.error("起仓被风控拒，策略停止")
+                sys.exit(1)
+
             resp = self.client.place_order(self.cfg.symbol, "sell", self.POSITION_SZ, 0.0, order_type="market")
             if resp.get("code") != "00000":
                 self.log.error(f"起仓失败: {resp.get('msg')}")
-                sys.exit(1)
-
-            px = 1.76 if self.dry_run else self.client.get_price(self.cfg.symbol)
-            if px <= 0:
-                self.log.error("无法获取成交价")
                 sys.exit(1)
 
             self.state["stack_top"] = px
             self.state["opens"] = 1
             self._save()
             return
+
+        # 限价/基准模式：挂初始 SELL 前过风控
+        if not self._can_open_sell(sell_px):
+            self.log.error("起仓被风控拒，策略停止")
+            sys.exit(1)
 
         resp = self.client.place_order(self.cfg.symbol, "sell", self.POSITION_SZ, sell_px,
                                        order_type="limit", cl_ord_id=_gen_cl_ord_id("INIT"))
@@ -330,18 +340,16 @@ class Strategy:
             sys.exit(1)
 
         # 启动 WebSocket（实时推送）
-        if not self.dry_run:
-            self._start_ws_thread()
+        self._start_ws_thread()
 
         self.log.info("策略运行中...")
         while self._running:
             try:
-                if not self.dry_run:
-                    now = time.time()
-                    # 定时对账（防漏推送，每 60s 一次）
-                    if now - self.last_reconcile_ts >= self.RECONCILE_SEC:
-                        self._reconcile()
-                        self.last_reconcile_ts = now
+                now = time.time()
+                # 定时对账（防漏推送，每 60s 一次）
+                if now - self.last_reconcile_ts >= self.RECONCILE_SEC:
+                    self._reconcile()
+                    self.last_reconcile_ts = now
 
             except SystemExit:
                 raise
@@ -601,19 +609,31 @@ class Strategy:
             self._refresh_orders()
 
     def _handle_buy_cancel(self, order: dict):
-        """BUY 被撤 → 删除，后续对账补挂"""
+        """BUY 被撤 → 退避计数后重挂（能进到这里说明非本策略主动撤 = 系统撤）
+
+        注：本策略主动撤的 BUY 在 _refresh_orders 里已先 pop 出 pending_buys，
+        因此走到这里的撤单都是交易所/系统侧撤单，计入退避。
+        """
         ord_id = order.get("ordId")
         acc_fill = float(order.get("accFillSz") or 0)
+        info = self.state.get("pending_buys", {}).get(ord_id, {})
+        re_px = float(info.get("target_px") or 0)
+
+        self.state["pending_buys"].pop(ord_id, None)
+        self._save()
 
         if acc_fill > 0:
             self.log.error(f"BUY 部分成交但被撤: {acc_fill}，零头需人工处理")
             self._notify(f"⚠️ BUY 零头: {acc_fill}，请手动平仓")
-            self.state["pending_buys"].pop(ord_id, None)
-            self._save()
             return
 
-        self.state["pending_buys"].pop(ord_id, None)
-        self._save()
+        # 系统撤单退避计数：频繁被撤同价位 → 退避，告警
+        if re_px > 0 and self._note_buy_cancel(re_px):
+            self.log.error(f"BUY @{re_px:.6f} 窗口内被撤 ≥{self.BUY_CANCEL_BACKOFF_N} 次，退避 {self.BUY_CANCEL_BACKOFF_SEC}s")
+            self._notify(f"⚠️ BUY @{re_px:.6f} 频繁被系统撤，退避 {self.BUY_CANCEL_BACKOFF_SEC}s")
+
+        # 补挂缺口（_refresh_orders 内部会跳过退避中的价位）
+        self._refresh_orders()
 
     def _cycle_complete(self):
         """一轮交易完成 - 清理所有挂单后退出"""
@@ -701,30 +721,44 @@ class Strategy:
                     sys.exit(1)
                 pending.pop(oid, None)
 
-            # ④ 挂缺少的单（补几何梯队）
+            # ④ 挂缺少的单（补几何梯队，退避中的价位跳过）
             current_pxs = [float(v.get("target_px", 0)) for v in pending.values()]
             for tpx, epx in desired:
-                if not any(abs(tpx - c) < tol for c in current_pxs):
-                    self._place_buy(epx, tpx)
+                if any(abs(tpx - c) < tol for c in current_pxs):
+                    continue
+                if self._in_backoff(tpx):
+                    continue  # 该价位退避中，等退避结束后由对账补挂
+                self._place_buy(epx, tpx)
 
             self._save()
 
-    def _margin_ratio_ok(self) -> bool:
-        """风控：保证金率 < 500% 时拦截新 SELL（equity / mmr < 5.0）"""
+    def _can_open_sell(self, px: float) -> bool:
+        """统一风控（起仓 + 加 SELL 共用，无分支）。两条规则：
+        ① 保证金率 ≥ 500%（equity / mmr ≥ 5.0）
+        ② 加仓后总名义 ≤ max_notional_usdt
+        无持仓/查询异常 → 放行。
+        """
         try:
             acct = self.client.get_account()
             equity = float(acct.get("data", [{}])[0].get("accountEquity") or 0)
-            mmr = 0.0
+            mmr = cur_size = 0.0
             for p in self.client.get_position(self.cfg.symbol).get("data", []):
                 if p.get("holdSide") == "short":
-                    mmr = float(p.get("mmr") or p.get("marginRatio") or 0)
+                    mmr = float(p.get("mmr") or 0)
+                    cur_size = float(p.get("total") or 0)
                     break
-            if mmr <= 0:
-                return True  # 无维持保证金（无持仓/数据缺失）不拦截
-            ratio = equity / mmr
-            if ratio < 5.0:
-                self._notify(f"⚠️ 风控拦截加仓: 保证金率 {ratio*100:.0f}% < 500%")
+
+            # ① 保证金率 ≥ 500%
+            if mmr > 0 and equity / mmr < 5.0:
+                self._notify(f"⚠️ 新增 SELL 被风控拒: 保证金率 {equity/mmr*100:.0f}% < 500%")
                 return False
+
+            # ② 加仓后总名义 ≤ 上限
+            notional = (cur_size + self.POSITION_SZ) * px
+            if notional > self.cfg.max_notional_usdt:
+                self._notify(f"⚠️ 新增 SELL 被风控拒: 总名义 {notional:.0f} > {self.cfg.max_notional_usdt}")
+                return False
+
             return True
         except Exception as e:
             self.log.warning(f"风控查询异常，放行: {e}")
@@ -738,8 +772,8 @@ class Strategy:
             self.log.error(f"BUG: 检测到多个 SELL，old_id={old_sell_id}，立即退出")
             sys.exit(1)
 
-        # 风控闸门：保证金率 < 500% 不允许新增 SELL
-        if not self._margin_ratio_ok():
+        # 风控闸门：加 SELL 被拒 → 跳过不挂（不动现有挂单，下次成交/对账重试）
+        if not self._can_open_sell(px):
             return
 
         try:
@@ -752,15 +786,14 @@ class Strategy:
                 self.state["pending_sell_ord_id"] = oid
                 self.state["pending_sell_px"] = px
                 self._save()
-            elif resp.get('code') == "50016":
-                self._market_add()
             else:
-                # 清挂单失败 → 快速失败
-                self.log.error(f"SELL 挂单失败: {resp.get('msg')}")
-                sys.exit(1)
+                # 交易所拒单（如限价带：SELL 目标远低于市价）→ 不降级、不退出，
+                # 仅记录 + 告警，等下次成交/对账重试。避免追涨乱加空。
+                self.log.warning(f"SELL 挂单被交易所拒(不降级): code={resp.get('code')} msg={resp.get('msg')}")
+                self._notify(f"⚠️ SELL 被拒(限价带?): {resp.get('msg')}，暂停加仓等回落")
         except Exception as e:
-            self.log.error(f"SELL 挂单异常: {e}")
-            sys.exit(1)
+            # 网络/异常同样不退出，等下次重试
+            self.log.warning(f"SELL 挂单异常(不降级): {e}")
 
     def _place_buy(self, entry: float, px: float):
         """挂BUY（原则：固定配对，entry_px 永不改动）"""
@@ -786,24 +819,30 @@ class Strategy:
         except Exception as e:
             self.log.warning(f"BUY 挂单异常: {e}")
 
-    def _market_add(self):
-        """市价加仓"""
-        px = self.client.get_price(self.cfg.symbol) or self.state.get("stack_top", 0)
-        if px <= 0:
-            return
+    # ====== BUY 重挂退避 ======
 
-        try:
-            resp = self.client.place_order(
-                self.cfg.symbol, "sell", self.POSITION_SZ, 0.0,
-                order_type="market"
-            )
-            if resp.get("code") == "00000":
-                self.state["stack_top"] = px
-                self.state["opens"] += 1
-                self._save()
-                self._refresh_orders()
-        except:
-            pass
+    def _note_buy_cancel(self, px: float) -> bool:
+        """记录一次 BUY 系统撤单；窗口内累计 ≥N 次则进入退避，返回 True"""
+        now = time.time()
+        k = round(float(px), 8)
+        hits = [t for t in self._buy_cancel_hits.get(k, []) if now - t < self.BUY_CANCEL_WINDOW_SEC]
+        hits.append(now)
+        self._buy_cancel_hits[k] = hits
+        if len(hits) >= self.BUY_CANCEL_BACKOFF_N:
+            self._buy_backoff[k] = now + self.BUY_CANCEL_BACKOFF_SEC
+            self._buy_cancel_hits[k] = []
+            return True
+        return False
+
+    def _in_backoff(self, px: float) -> bool:
+        """该价位是否在退避窗口内"""
+        now = time.time()
+        k = round(float(px), 8)
+        until = self._buy_backoff.get(k, 0)
+        if until <= now:
+            self._buy_backoff.pop(k, None)
+            return False
+        return True
 
     def _round_px(self, px: float) -> float:
         """取整价格"""

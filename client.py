@@ -43,13 +43,11 @@ class BitgetClient:
         secret_key: str,
         passphrase: str,
         logger: logging.Logger,
-        dry_run: bool = False,
     ):
         self.api_key = api_key
         self.secret_key = secret_key
         self.passphrase = passphrase
         self.log = logger
-        self.dry_run = dry_run
         self.session = requests.Session()
 
     def _timestamp(self) -> str:
@@ -262,13 +260,6 @@ class BitgetClient:
         return data
 
     def _post(self, path: str, body: dict) -> dict:
-        if self.dry_run:
-            self.log.debug(f"[DRY-RUN] POST {path} body={json.dumps(body, ensure_ascii=False)}")
-            return {
-                "code": "00000",
-                "msg": "success",
-                "data": {"orderId": "dry_run_order", "clientOid": body.get("clientOid", "")},
-            }
         body_str = json.dumps(body, ensure_ascii=False)
         headers = self._headers("POST", path, body=body_str)
         url = BASE_URL + path

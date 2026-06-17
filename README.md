@@ -169,68 +169,43 @@ TG_CHAT_ID=-1001234567890
 
 ## 🚀 运行指南
 
-### Dry-Run 模式（模拟测试）
+> **仅实盘**：项目已移除模拟盘（dry-run）。如需测试，请用小额资金（如 `--sz 1`）在实盘验证。
 
-**不发真实订单**，适合验证策略逻辑：
-
-```bash
-python -m bitget_short_pyramid.strategy dry-run \
-  --symbol WLDUSDT \
-  --size 100 \
-  --grid 0.02 \
-  --interval 5
-```
-
-**观察输出**：
-```
-=== 初始化 WLDUSDT [DRY-RUN] ===
-symbolStatus: normal
-持仓模式已设置为: one_way_mode
-杠杆已设置为 3x
-size=100 验证通过
-起仓: 市价空 100 张
-起仓成功: stack_top=1.760000
-[refresh|startup|r123456] SELL: desired=1.795200 cur=None needs_refresh=True
-[123456] SELL postOnly 已挂 dry_run_order @ 1.795200
-启动完成: 模式=DRY-RUN 网格=2.00% stack_top=1.760000 持仓=1 单
-策略启动: [DRY-RUN] 轮询间隔=5s
-```
-
-### Live 模式（实盘交易）
+### 实盘交易
 
 ⚠️ **风险提示**：实盘会产生真实盈亏，请先小额测试！
 
 #### 模式 1：市价起仓（最简单）
 ```bash
-python -m bitget_short_pyramid.strategy live \
+python -m strategy \
   --symbol BGBUSDT \
-  --size 4 \
+  --sz 4 \
   --grid 0.005
 ```
 
 #### 模式 2：限价起仓（指定价格）
 ```bash
-python -m bitget_short_pyramid.strategy live \
+python -m strategy \
   --symbol BGBUSDT \
-  --size 4 \
+  --sz 4 \
   --grid 0.005 \
   --initial-sell-px 1.80
 ```
 
 #### 模式 3：基准价起仓（自动偏移）
 ```bash
-python -m bitget_short_pyramid.strategy live \
+python -m strategy \
   --symbol BGBUSDT \
-  --size 4 \
+  --sz 4 \
   --grid 0.005 \
   --adopt-sell-px 1.75
 ```
 
 **完整参数示例**：
 ```bash
-python -m bitget_short_pyramid.strategy live \
+python -m strategy \
   --symbol BGBUSDT \
-  --size 4 \
+  --sz 4 \
   --grid 0.005 \
   --interval 5 \
   --leverage 3 \
@@ -246,7 +221,7 @@ Linux/macOS 使用 `screen` 保持后台运行：
 screen -S wld_bot
 
 # 在 screen 内运行机器人
-python -m bitget_short_pyramid.strategy live --symbol WLDUSDT --size 100 --grid 0.02
+python -m strategy --symbol WLDUSDT --sz 100 --grid 0.02
 
 # 分离会话：按 Ctrl+A，然后按 D
 # 重新进入：
@@ -264,13 +239,13 @@ Windows 推荐使用 **PowerShell** 或 **任务计划程序**。
 
 ```bash
 # 终端 1：运行 WLDUSDT
-python -m bitget_short_pyramid.strategy live --symbol WLDUSDT --size 100 --grid 0.02
+python -m strategy --symbol WLDUSDT --sz 100 --grid 0.02
 
 # 终端 2：运行 BGBUSDT
-python -m bitget_short_pyramid.strategy live --symbol BGBUSDT --size 4 --grid 0.005
+python -m strategy --symbol BGBUSDT --sz 4 --grid 0.005
 
 # 终端 3：运行 TONUSDT
-python -m bitget_short_pyramid.strategy live --symbol TONUSDT --size 50 --grid 0.015
+python -m strategy --symbol TONUSDT --sz 50 --grid 0.015
 ```
 
 ---
@@ -282,7 +257,7 @@ python -m bitget_short_pyramid.strategy live --symbol TONUSDT --size 50 --grid 0
 | 参数 | 说明 | 示例 |
 |------|------|------|
 | `--symbol` | 交易对（大写） | `--symbol WLDUSDT` |
-| `--size` | 每单张数（⚠️ **必须显式传入**） | `--size 100` |
+| `--sz` | 每单张数（⚠️ **必须显式传入**） | `--sz 100` |
 
 ### 核心策略参数
 
@@ -309,8 +284,8 @@ python -m bitget_short_pyramid.strategy live --symbol TONUSDT --size 50 --grid 0
 
 #### 1️⃣ 默认（市价起仓）
 ```bash
-python -m bitget_short_pyramid.strategy live \
-  --symbol BGBUSDT --size 4 --grid 0.005
+python -m strategy \
+  --symbol BGBUSDT --sz 4 --grid 0.005
 ```
 - **动作**：立即市价空 1 张
 - **stack_top**：设置为成交价
@@ -320,8 +295,8 @@ python -m bitget_short_pyramid.strategy live \
 
 #### 2️⃣ 限价模式（--initial-sell-px）
 ```bash
-python -m bitget_short_pyramid.strategy live \
-  --symbol BGBUSDT --size 4 --grid 0.005 \
+python -m strategy \
+  --symbol BGBUSDT --sz 4 --grid 0.005 \
   --initial-sell-px 1.80
 ```
 - **动作**：限价挂 1 张 @ 1.80，**网格立即启动**
@@ -333,8 +308,8 @@ python -m bitget_short_pyramid.strategy live \
 
 #### 3️⃣ 基准价模式（--adopt-sell-px）
 ```bash
-python -m bitget_short_pyramid.strategy live \
-  --symbol BGBUSDT --size 4 --grid 0.005 \
+python -m strategy \
+  --symbol BGBUSDT --sz 4 --grid 0.005 \
   --adopt-sell-px 1.75
 ```
 - **动作**：基准 1.75 自动往上偏移 0.5%（grid 幅度）→ SELL @ 1.7538
@@ -359,9 +334,9 @@ python -m bitget_short_pyramid.strategy live \
 **示例**：
 ```bash
 # 保守配置：单笔不超过 5000 USDT，保证金率不低于 800%
-python -m bitget_short_pyramid.strategy live \
+python -m strategy \
   --symbol BTCUSDT \
-  --size 0.1 \
+  --sz 0.1 \
   --grid 0.02 \
   --max-notional-usdt 5000 \
   --min-margin-ratio 8.0
@@ -382,33 +357,73 @@ python -m bitget_short_pyramid.strategy live \
 
 ## 🛡️ 风控系统
 
-### 加仓闸门：保证金率检查
+### 核心原则：风控只拦"加风险"的方向（SELL）
 
-**目的**：防止账户保证金率过低时继续加仓导致爆仓。
+> SELL = 加空 = 放大风险 → **每次新增 SELL（起仓 + 加仓）都过同一道风控闸门**。
+> BUY = 平空 = 降低风险 → **平仓单一律放行**，不做账户风控。
 
-**触发时机**：每次新增 SELL 单前（`_place_sell` 内）。
+### 统一风控函数 `_can_open_sell`
 
-**逻辑**：
+起仓和网格加 SELL **共用同一函数、同一套规则，无开关无分支**。拉一次账户快照（REST），复核两条：
+
 ```python
-def _margin_ratio_ok(self) -> bool:
-    """保证金率 < 500% 时拦截新 SELL（equity / mmr < 5.0）"""
-    equity = 账户权益(accountEquity)
-    mmr    = 当前空头持仓的维持保证金(mmr)
-    if mmr <= 0:            # 无持仓/数据缺失 → 放行
-        return True
-    ratio = equity / mmr
-    if ratio < 5.0:        # 低于 500% → 拦截
-        notify("⚠️ 风控拦截加仓: 保证金率 xxx% < 500%")
+def _can_open_sell(self, px) -> bool:
+    equity   = 账户权益(accountEquity)
+    mmr      = 空头持仓维持保证金(mmr)
+    cur_size = 空头持仓张数(total)
+
+    # ① 保证金率 ≥ 500%
+    if mmr > 0 and equity / mmr < 5.0:
+        notify("⚠️ 新增 SELL 被风控拒: 保证金率 < 500%")
         return False
-    return True
+
+    # ② 加仓后总名义 ≤ 上限
+    notional = (cur_size + POSITION_SZ) * px
+    if notional > max_notional_usdt:   # 默认 10000 USDT
+        notify("⚠️ 新增 SELL 被风控拒: 总名义超限")
+        return False
+
+    return True   # 无持仓 / 查询异常 → 放行
 ```
 
-**行为**：
-- 保证金率 ≥ 500% → 正常挂 SELL
-- 保证金率 < 500% → **跳过本次加仓**（不退出策略，BUY 平仓网格继续运行，等价格回落平仓后保证金率回升）
-- 查询异常 → 放行（不因查询失败误杀，由 60s 对账和 monitor 兜底）
+### 两个调用路径（区别只在被拒动作）
+
+| 路径 | 函数 | 被拒动作 |
+|------|------|---------|
+| **起仓** | `_open`（市价 / 限价 / 基准三模式） | ⛔ 停策略（`sys.exit`） |
+| **加 SELL** | `_place_sell`（成交/对账后移动 SELL） | ⚠️ 跳过不挂，**不动现有挂单**，下次成交/对账重试 |
+
+- 保证金率 < 500% **或** 总名义超限 → 拒
+- `mmr=0`（无持仓）/ 查询异常 → 放行（不误杀，靠 60s 对账和 monitor 兜底）
+- 平仓 BUY（`reduce_only=True`）→ 跳过风控，直接挂
 
 > 与独立的 [monitor.py](monitor.py) 配合：monitor 负责事后 Telegram 告警，本闸门负责**下单前拦截**，双重防护。
+
+### BUY 重挂退避（防系统撤单死循环）
+
+> 借鉴 OKX 设计：同一价位的 BUY 在交易所被系统反复撤单时，盲目重挂会刷爆下单频率（429 限流）。
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `BUY_CANCEL_BACKOFF_N` | 3 | 窗口内被系统撤几次后触发退避 |
+| `BUY_CANCEL_WINDOW_SEC` | 120 | 退避计数窗口（秒）|
+| `BUY_CANCEL_BACKOFF_SEC` | 180 | 退避时长（秒），期间该价位不再挂 |
+
+**逻辑**：
+- 本策略主动撤的 BUY 在 `_refresh_orders` 里已先移出 `pending_buys`，所以走到 `_handle_buy_cancel` 的都是**系统/交易所侧撤单**，计入退避。
+- 同价位 120s 内被撤 ≥3 次 → 该价位退避 180s（`_refresh_orders` 跳过），并发 Telegram 告警。
+- 退避到期后由 60s 定时对账自然补挂。
+- 退避状态是**内存态**（不持久化），重启即清零。
+
+### SELL 限价带处理（不降级）
+
+> 借鉴 OKX 设计：市价急涨穿过网格时，新 SELL 目标价可能落在交易所限价带之外被拒。
+
+**行为**：SELL 被交易所拒单 → **不降级转市价、不退出策略**，仅记录 + Telegram 告警，等下次成交/对账重试。
+
+- ✅ 避免追涨乱加空（市价回落到带内自动恢复挂 SELL）
+- ✅ 持仓的 BUY 平仓网格不受影响，继续保护
+- ⚠️ 已知局限：单边大涨时 `stack_top` 跟不上，策略在涨势中"安全暂停"加仓
 
 ### 其他安全机制
 
@@ -493,7 +508,7 @@ TG_CHAT_ID=-1001234567890
 **5. 测试**
 ```bash
 # 运行机器人，观察是否收到启动通知
-python -m bitget_short_pyramid.strategy live --symbol WLDUSDT --size 100 --grid 0.02
+python -m strategy --symbol WLDUSDT --sz 100 --grid 0.02
 ```
 
 **注意**：
@@ -552,7 +567,7 @@ print(f"pending_buys: {len(state['pending_buys'])} 个")
 **重启时调整**：
 ```bash
 # 原网格 2%，改为 1.5%
-python -m bitget_short_pyramid.strategy live --symbol WLDUSDT --size 100 --grid 0.015
+python -m strategy --symbol WLDUSDT --sz 100 --grid 0.015
 ```
 
 **建议**：小步调整（每次 ±0.5%），观察效果后再决定是否继续调整。
@@ -597,20 +612,12 @@ logs/TONUSDT_2026-06-14_10-32-00.log
 
 **文件锁保护**：即使意外启动两个相同币种的进程，PKL 文件也会加独占锁，防止数据覆盖。
 
-### Q7: dry-run 和 live 的区别？
+### Q7: 如何安全测试？
 
-| 对比项 | dry-run | live |
-|--------|---------|------|
-| 真实下单 | ❌ 否 | ✅ 是 |
-| API 调用 | 模拟返回 | 真实请求 |
-| 价格来源 | 随机波动 | 实时行情 |
-| 适用场景 | 测试逻辑 | 实盘交易 |
-| 风险提示 | 无 | 需确认 |
-
-**建议流程**：
-1. 先用 dry-run 跑 10 分钟，观察日志是否正常
-2. 再用小额资金 live 测试（如 `--size 1`）
-3. 确认无误后逐步加大仓位
+项目**仅支持实盘**（已移除模拟盘）。建议：
+1. 用小额资金起步（如 `--sz 1`），观察日志和 Telegram 通知是否正常
+2. 确认风控、起仓、加减仓全流程无误
+3. 逐步加大仓位
 
 ---
 
@@ -666,8 +673,7 @@ grep "盈亏" logs/WLDUSDT_*.log | tail -20
 
 - 请只用你能承受损失的资金
 - API Key 请勿泄露给任何人
-- 建议先用 dry-run 充分验证策略逻辑
-- 建议先小额实盘测试，确认参数合适后再加大仓位
+- 建议先小额实盘测试（如 `--sz 1`），确认参数合适后再加大仓位
 
 ### 已知风险
 
@@ -682,10 +688,9 @@ grep "盈亏" logs/WLDUSDT_*.log | tail -20
 ### 最佳实践
 
 ✅ **推荐做法**：
-1. 先用 dry-run 测试至少 30 分钟
-2. 实盘从小额开始（如 `--size 1`）
-3. 设置合理的 `--max-notional-usdt`（建议 ≤ 账户资金的 10%）
-4. 定期检查 Telegram 通知和日志
+1. 实盘从小额开始（如 `--sz 1`）
+2. 设置合理的 `--max-notional`（建议 ≤ 账户资金的 10%）
+3. 定期检查 Telegram 通知和日志
 5. 保留足够的账户余额（建议 ≥ 500 USDT）
 
 ❌ **禁止做法**：
@@ -701,19 +706,19 @@ grep "盈亏" logs/WLDUSDT_*.log | tail -20
 - 每单价值：≤ 100 USDT
 - 最大持仓：≤ 5 单
 - 总资金占用：≤ 500 USDT
-- 示例：`--size 10 --grid 0.02 --max-notional-usdt 100`
+- 示例：`--sz 10 --grid 0.02 --max-notional-usdt 100`
 
 **稳健型**（有经验）：
 - 每单价值：100 ~ 500 USDT
 - 最大持仓：≤ 10 单
 - 总资金占用：≤ 3000 USDT
-- 示例：`--size 50 --grid 0.015 --max-notional-usdt 500`
+- 示例：`--sz 50 --grid 0.015 --max-notional-usdt 500`
 
 **激进型**（专业玩家）：
 - 每单价值：500 ~ 2000 USDT
 - 最大持仓：≤ 20 单
 - 总资金占用：≤ 20000 USDT
-- 示例：`--size 200 --grid 0.01 --max-notional-usdt 2000`
+- 示例：`--sz 200 --grid 0.01 --max-notional-usdt 2000`
 
 ---
 
@@ -870,4 +875,4 @@ MIT License
 ---
 
 **最后更新时间**：2026-06-15  
-**版本**：v2.4.0（修正 WebSocket V2 私有频道：正确 URL + login 格式 + 心跳 + 字段映射）
+**版本**：v2.7.0（移除 dry-run 模拟盘，仅保留实盘）
