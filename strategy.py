@@ -181,13 +181,17 @@ class Strategy:
         """优雅退出（SIGINT 处理）"""
         self.log.info("收到中断信号，正在优雅退出...")
         self._running = False
-        self._notify("⏹️ 策略已手动停止")
+        self._notify("策略已手动停止")
 
-    def _notify(self, msg: str):
-        """发送通知"""
+    LEVEL_EMOJI = {"INFO": "ℹ️", "WARN": "⚠️", "CRITICAL": "🚨"}
+
+    def _notify(self, msg: str, level: str = "INFO"):
+        """发送通知（带等级前缀）"""
         self.log.info(msg)
         if self.cfg.tg_bot_token:
-            _send_telegram(f"<b>{self.cfg.symbol}</b>\n{msg}", self.cfg.tg_bot_token, self.cfg.tg_chat_id)
+            emoji = self.LEVEL_EMOJI.get(level, "ℹ️")
+            text = f"{emoji} [{level}]\n{msg}"
+            _send_telegram(text, self.cfg.tg_bot_token, self.cfg.tg_chat_id)
 
     def _save(self):
         """保存状态"""
@@ -258,12 +262,22 @@ class Strategy:
         # 接管或起仓
         if not self._adopt_position():
             self._open()
+            if self.cfg.adopt_sell_px > 0:
+                open_mode = "基准"
+            elif self.cfg.initial_sell_px > 0:
+                open_mode = "限价"
+            else:
+                open_mode = "市价"
+        else:
+            open_mode = "接管"
 
         # 挂网格
         self._refresh_orders()
 
-        n = max(0, self.state.get("opens", 0) - self.state.get("closes", 0))
-        self._notify(f"✅ {self.cfg.symbol} | pos={n}")
+        self._notify(
+            f"策略启动 | {self.cfg.symbol} | 数量 {self.POSITION_SZ} | "
+            f"网格 {self.GRID_PCT*100:.1f}% | 开仓 {open_mode}"
+        )
         self._save()
 
     def _adopt_position(self) -> bool:
@@ -438,7 +452,7 @@ class Strategy:
             frac = okx_sz % self.POSITION_SZ
             if frac > 1e-9:
                 self.log.error(f"检测到零头: {frac:.4f}，需人工处理")
-                self._notify(f"⚠️ 零头告警: {frac:.4f}，请在网页手动平仓")
+                self._notify(f"零头告警: {frac:.4f}，请在网页手动平仓", level="WARN")
                 return
 
             # ⑤ 对比（容忍 < POSITION_SZ 的差异）
@@ -560,7 +574,7 @@ class Strategy:
         frac = acc_fill % self.POSITION_SZ
         if frac > 1e-9:
             self.log.error(f"SELL 零头告警: 成交 {acc_fill}，零头 {frac}")
-            self._notify(f"⚠️ SELL 零头: {frac}，请手动平仓")
+            self._notify(f"SELL 零头: {frac}，请手动平仓", level="WARN")
             return
 
         px = float(order.get("avgPx") or 0) or self.state.get("pending_sell_px", 0)
@@ -570,7 +584,8 @@ class Strategy:
         self.state["pending_sell_px"] = None
         self.last_reconcile_ts = time.time()
 
-        self._notify(f"SELL @{px:.6f} opens={self.state['opens']}")
+        n = max(0, self.state.get("opens", 0) - self.state.get("closes", 0))
+        self._notify(f"加仓成交 | {self.cfg.symbol} | 成交价 {px:.6f} | 持仓 {n}单")
         self._save()
         self._refresh_orders()
 
@@ -579,7 +594,7 @@ class Strategy:
         acc_fill = float(order.get("accFillSz") or 0)
         if acc_fill > 0:
             self.log.error(f"SELL 部分成交但被撤: {acc_fill}，零头需人工处理")
-            self._notify(f"⚠️ SELL 零头: {acc_fill}，请手动平仓")
+            self._notify(f"SELL 零头: {acc_fill}，请手动平仓", level="WARN")
             return
 
         self.state["pending_sell_ord_id"] = None
@@ -597,7 +612,7 @@ class Strategy:
         self.state["pending_buys"].pop(ord_id, None)
         self.last_reconcile_ts = time.time()
 
-        self._notify(f"BUY @{px:.6f} PnL={pnl:+.2f}")
+        self._notify(f"平仓成交 | {self.cfg.symbol} | 成交价 {px:.6f} | 盈亏 {pnl:+.2f}")
         self._save()
 
         # 检查一轮是否完成
@@ -624,13 +639,13 @@ class Strategy:
 
         if acc_fill > 0:
             self.log.error(f"BUY 部分成交但被撤: {acc_fill}，零头需人工处理")
-            self._notify(f"⚠️ BUY 零头: {acc_fill}，请手动平仓")
+            self._notify(f"BUY 零头: {acc_fill}，请手动平仓", level="WARN")
             return
 
         # 系统撤单退避计数：频繁被撤同价位 → 退避，告警
         if re_px > 0 and self._note_buy_cancel(re_px):
             self.log.error(f"BUY @{re_px:.6f} 窗口内被撤 ≥{self.BUY_CANCEL_BACKOFF_N} 次，退避 {self.BUY_CANCEL_BACKOFF_SEC}s")
-            self._notify(f"⚠️ BUY @{re_px:.6f} 频繁被系统撤，退避 {self.BUY_CANCEL_BACKOFF_SEC}s")
+            self._notify(f"BUY @{re_px:.6f} 频繁被系统撤，退避 {self.BUY_CANCEL_BACKOFF_SEC}s", level="WARN")
 
         # 补挂缺口（_refresh_orders 内部会跳过退避中的价位）
         self._refresh_orders()
@@ -655,7 +670,7 @@ class Strategy:
         self.state["pending_buys"] = {}
         self._save()
 
-        self._notify("✅ 一轮做空完成，所有挂单已清理")
+        self._notify("一轮做空完成，所有挂单已清理")
         sys.exit(0)
 
     def _refresh_orders(self):
@@ -752,13 +767,13 @@ class Strategy:
 
             # ① 保证金率 ≥ 500%
             if mmr > 0 and equity / mmr < 5.0:
-                self._notify(f"⚠️ 新增 SELL 被风控拒: 保证金率 {equity/mmr*100:.0f}% < 500%")
+                self._notify(f"新增 SELL 被风控拒: 保证金率 {equity/mmr*100:.0f}% < 500%", level="WARN")
                 return False
 
             # ② 加仓后总名义 ≤ 上限
             notional = (cur_size + self.POSITION_SZ) * px
             if notional > self.cfg.max_notional_usdt:
-                self._notify(f"⚠️ 新增 SELL 被风控拒: 总名义 {notional:.0f} > {self.cfg.max_notional_usdt}")
+                self._notify(f"新增 SELL 被风控拒: 总名义 {notional:.0f} > {self.cfg.max_notional_usdt}", level="WARN")
                 return False
 
             return True
@@ -792,7 +807,7 @@ class Strategy:
                 # 交易所拒单（如限价带：SELL 目标远低于市价）→ 不降级、不退出，
                 # 仅记录 + 告警，等下次成交/对账重试。避免追涨乱加空。
                 self.log.warning(f"SELL 挂单被交易所拒(不降级): code={resp.get('code')} msg={resp.get('msg')}")
-                self._notify(f"⚠️ SELL 被拒(限价带?): {resp.get('msg')}，暂停加仓等回落")
+                self._notify(f"SELL 被拒(限价带?): {resp.get('msg')}，暂停加仓等回落", level="WARN")
         except Exception as e:
             # 网络/异常同样不退出，等下次重试
             self.log.warning(f"SELL 挂单异常(不降级): {e}")
