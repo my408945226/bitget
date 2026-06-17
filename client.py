@@ -96,6 +96,21 @@ class BitgetClient:
                 return 0.0
         return 0.0
 
+    def get_funding_rate(self, symbol: str) -> float:
+        """GET /api/v3/market/tickers - 获取当前资金费率（8h 周期）"""
+        path = "/api/v3/market/tickers"
+        params = {"category": "USDT-FUTURES", "symbol": symbol}
+        resp = self._get(path, params)
+        if resp.get("code") != "00000":
+            return 0.0
+        data = resp.get("data", [])
+        if isinstance(data, list) and data:
+            try:
+                return float(data[0].get("fundingRate") or 0)
+            except (TypeError, ValueError):
+                return 0.0
+        return 0.0
+
     def get_contracts(self, symbol: str) -> dict:
         """GET /api/v3/market/instruments - 获取合约信息
 
