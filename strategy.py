@@ -739,12 +739,14 @@ class Strategy:
         无持仓/查询异常 → 放行。
         """
         try:
-            acct = self.client.get_account()
-            equity = float(acct.get("data", [{}])[0].get("accountEquity") or 0)
-            mmr = cur_size = 0.0
+            # 账户级权益与维持保证金（联合保证金账户级，比持仓级更可靠）
+            a = self.client.get_account().get("data", [{}])[0]
+            equity = float(a.get("accountEquity") or 0)
+            mmr = float(a.get("mmr") or 0)
+
+            cur_size = 0.0
             for p in self.client.get_position(self.cfg.symbol).get("data", []):
                 if p.get("holdSide") == "short":
-                    mmr = float(p.get("mmr") or 0)
                     cur_size = float(p.get("total") or 0)
                     break
 

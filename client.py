@@ -142,27 +142,41 @@ class BitgetClient:
     # ====== 私密接口：账户 ======
 
     def get_account(self, margin_coin: str = "USDT") -> dict:
-        """GET /api/v3/account/assets - 获取账户资产"""
+        """GET /api/v3/account/assets - 获取账户资产（联合保证金 UTA）
+
+        顶层即含账户级 accountEquity / usdtEquity / mmr / mgnRatio。
+        """
         path = "/api/v3/account/assets"
-        params = {}
+        params = {"category": "USDT-FUTURES"}  # GET 必带 category
         resp = self._get(path, params, private=True)
         if resp.get("code") != "00000":
             return {}
         data = resp.get("data") or {}
         if isinstance(data, list):
             data = data[0] if data else {}
-        # 找出 USDT 余额
+
+        # 总权益：优先 accountEquity(USD)，回退 usdtEquity
+        equity = data.get("accountEquity") or data.get("usdtEquity") or "0"
+
+        # 找出 USDT 可用余额
         available = "0"
         for asset in data.get("assets") or []:
             if str(asset.get("coin", "")).upper() == margin_coin.upper():
                 available = asset.get("available", "0")
                 break
+
+        # 诊断：权益为空时打印顶层字段名，便于定位结构差异
+        if not equity or float(equity or 0) == 0:
+            self.log.warning(f"账户权益为 0，原始顶层字段: {list(data.keys())}")
+
         return {
             "code": "00000",
             "data": [{
                 "available": available,
-                "accountEquity": data.get("accountEquity", "0"),
+                "accountEquity": equity,
                 "usdtEquity": data.get("usdtEquity", "0"),
+                "mmr": data.get("mmr", "0"),
+                "mgnRatio": data.get("mgnRatio", "0"),
             }]
         }
 

@@ -114,7 +114,9 @@ class AccountMonitor:
         if acct.get("code") != "00000":
             self.log.warning(f"查询账户失败: {acct.get('msg', 'unknown')}")
             return
-        equity = float(acct.get("data", [{}])[0].get("accountEquity") or 0)
+        a = acct.get("data", [{}])[0]
+        equity = float(a.get("accountEquity") or 0)
+        mmr = float(a.get("mmr") or 0)
 
         pos_resp = self.client.get_position("")
         if pos_resp.get("code") != "00000":
@@ -122,11 +124,10 @@ class AccountMonitor:
             return
         positions = [p for p in pos_resp.get("data", []) if float(p.get("total") or 0) != 0]
 
-        # 保证金率 = 权益 / 维持保证金总和
-        total_mmr = sum(float(p.get("mmr") or 0) for p in positions)
-        mgn_ratio = equity / total_mmr if total_mmr > 0 else float('inf')
+        # 保证金率 = 权益 / 账户维持保证金（联合保证金账户级，mmr=0 表示无持仓）
+        mgn_ratio = equity / mmr if mmr > 0 else float('inf')
 
-        self._log_equity(equity, mgn_ratio, total_mmr, len(positions))
+        self._log_equity(equity, mgn_ratio, mmr, len(positions))
         self._check_margin(equity, mgn_ratio)
         self._check_funding(positions)
         self._check_order_shape(positions)
