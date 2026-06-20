@@ -20,13 +20,9 @@ import logging
 from pathlib import Path
 from datetime import datetime
 
-try:
-    import requests
-except ImportError:
-    requests = None
-
 from config import parse_monitor_args
 from client import BitgetClient
+from notifier import TelegramNotifier
 
 
 def _setup_logger(name: str):
@@ -48,20 +44,6 @@ def _setup_logger(name: str):
     fh.setFormatter(fmt)
     logger.addHandler(fh)
     return logger
-
-
-def _send_telegram(msg: str, bot_token: str, chat_id: str):
-    """发送 Telegram 消息"""
-    if not bot_token or not chat_id or not requests:
-        return
-    try:
-        requests.post(
-            f"https://api.telegram.org/bot{bot_token}/sendMessage",
-            json={"chat_id": chat_id, "text": msg, "parse_mode": "HTML"},
-            timeout=5
-        )
-    except Exception:
-        pass
 
 
 class AccountMonitor:
@@ -92,6 +74,7 @@ class AccountMonitor:
         self.cfg = cfg
         self.log = _setup_logger("monitor")
         self.client = BitgetClient(cfg.api_key, cfg.secret_key, cfg.passphrase, self.log)
+        self.notifier = TelegramNotifier(cfg.tg_bot_token, cfg.tg_chat_id, self.log)
         self._last_alerts = {}
         self._start_ts = time.time()
         self._last_heartbeat = 0.0
@@ -325,9 +308,8 @@ class AccountMonitor:
         self._send_msg(msg)
 
     def _send_msg(self, msg: str):
-        """发送 Telegram"""
-        if self.cfg.tg_bot_token:
-            _send_telegram(f"账户监控\n{msg}", self.cfg.tg_bot_token, self.cfg.tg_chat_id)
+        """发送 Telegram（消息已自带格式，prefix=False；失败检测/紧急自救由 notifier 负责）"""
+        self.notifier.send(f"账户监控\n{msg}", prefix=False)
 
 
 def main():

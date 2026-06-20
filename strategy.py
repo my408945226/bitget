@@ -11,13 +11,9 @@ from pathlib import Path
 from decimal import Decimal, ROUND_DOWN, InvalidOperation
 from datetime import datetime
 
-try:
-    import requests
-except ImportError:
-    requests = None
-
 from config import parse_args, Config
 from client import BitgetClient, _gen_cl_ord_id
+from notifier import TelegramNotifier
 
 
 # ============ 日志模块 ============
@@ -41,20 +37,6 @@ def _setup_logger(symbol: str, log_dir: str = "logs") -> logging.Logger:
     fh.setFormatter(fmt)
     logger.addHandler(fh)
     return logger
-
-
-def _send_telegram(msg: str, bot_token: str, chat_id: str):
-    """发送 Telegram 消息"""
-    if not bot_token or not chat_id or not requests:
-        return
-    try:
-        requests.post(
-            f"https://api.telegram.org/bot{bot_token}/sendMessage",
-            json={"chat_id": chat_id, "text": msg, "parse_mode": "HTML"},
-            timeout=5
-        )
-    except Exception:
-        pass
 
 
 # ============ 精度处理模块 ============
@@ -158,6 +140,7 @@ class Strategy:
         self.cfg = cfg
         self.log = _setup_logger(cfg.symbol)
         self.client = BitgetClient(cfg.api_key, cfg.secret_key, cfg.passphrase, self.log)
+        self.notifier = TelegramNotifier(cfg.tg_bot_token, cfg.tg_chat_id, self.log)
         self.state: State = _load_state(cfg.symbol)
         self.GRID_PCT = cfg.grid_pct
         self.POSITION_SZ = cfg.size
@@ -183,15 +166,9 @@ class Strategy:
         self._running = False
         self._notify("策略已手动停止")
 
-    LEVEL_EMOJI = {"INFO": "ℹ️", "WARN": "⚠️", "CRITICAL": "🚨"}
-
     def _notify(self, msg: str, level: str = "INFO"):
-        """发送通知（带等级前缀）"""
-        self.log.info(msg)
-        if self.cfg.tg_bot_token:
-            emoji = self.LEVEL_EMOJI.get(level, "ℹ️")
-            text = f"{emoji} [{level}]\n{msg}"
-            _send_telegram(text, self.cfg.tg_bot_token, self.cfg.tg_chat_id)
+        """发送通知（带等级前缀；失败检测/紧急自救由 notifier 负责）"""
+        self.notifier.send(msg, level=level)
 
     def _save(self):
         """保存状态"""
@@ -479,6 +456,16 @@ class Strategy:
                 self._notify(f"对账: 加仓 {n_added} 张")
 
             self._save()
+
+            # 平到 opens==closes>0 → 一轮完成，与 WS 平仓路径(_handle_buy_fill)一致：
+            # 撤所有挂单 + sys.exit(0)。漏了这步会导致仓位已平却空转、甚至凭空重挂 SELL。
+            opens = self.state.get("opens", 0)
+            closes = self.state.get("closes", 0)
+            if opens > 0 and opens == closes:
+                self.log.info("对账检测到一轮已平完，正常结束")
+                self._cycle_complete()
+                return
+
             self._refresh_orders()
 
         except Exception as e:
@@ -497,6 +484,10 @@ class Strategy:
 
         n_pos = max(0, self.state.get("opens", 0) - self.state.get("closes", 0))
 
+        # 无持仓时不补任何单（防止 0 持仓凭空挂 SELL 重新开空）
+        if n_pos == 0:
+            return
+
         # 检查 SELL
         sell_id = self.state.get("pending_sell_ord_id")
         if not sell_id or (sell_id not in open_ids):
@@ -504,24 +495,24 @@ class Strategy:
             self._place_sell(sell_px)
 
         # 检查 BUY
-        if n_pos > 0:
-            self._refresh_orders()
+        self._refresh_orders()
 
     def _check_missed_fills(self):
         """检查 WS 漏推送（补救已成交但漏推的订单）"""
         try:
             open_ids = {o.get("orderId") for o in self.client.get_open_orders(self.cfg.symbol)}
 
-            # 检查 SELL
+            # 检查 SELL（Bitget v3 字段为 status/priceAvg，兼容 orderStatus/avgPrice 命名）
             sell_id = self.state.get("pending_sell_ord_id")
             if sell_id and sell_id not in open_ids:
                 info = self.client.get_order_info(self.cfg.symbol, sell_id)
-                if info.get("orderStatus") == "filled":
+                if (info.get("status") or info.get("orderStatus")) == "filled":
                     # 补救：补推一个虚拟的 on_fill 事件
                     fake_order = {
                         "ordId": sell_id,
                         "status": "filled",
-                        "avgPx": info.get("avgPrice", self.state.get("pending_sell_px")),
+                        "avgPx": (info.get("priceAvg") or info.get("avgPrice")
+                                  or self.state.get("pending_sell_px")),
                     }
                     self.on_fill(fake_order)
 
@@ -529,12 +520,12 @@ class Strategy:
             for oid in list(self.state.get("pending_buys", {}).keys()):
                 if oid not in open_ids:
                     info = self.client.get_order_info(self.cfg.symbol, oid)
-                    if info.get("orderStatus") == "filled":
+                    if (info.get("status") or info.get("orderStatus")) == "filled":
                         # 补救：补推一个虚拟的 on_fill 事件
                         fake_order = {
                             "ordId": oid,
                             "status": "filled",
-                            "avgPx": info.get("avgPrice"),
+                            "avgPx": info.get("priceAvg") or info.get("avgPrice"),
                         }
                         self.on_fill(fake_order)
 
