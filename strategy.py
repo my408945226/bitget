@@ -375,7 +375,7 @@ class Strategy:
         self._save()
         self.log.info("策略已停止")
 
-    def _get_okx_size(self) -> float:
+    def _get_exchange_size(self) -> float:
         """获取交易所实际持仓"""
         try:
             for p in self.client.get_position(self.cfg.symbol).get("data", []):
@@ -441,7 +441,7 @@ class Strategy:
             self._check_missed_fills()
 
             # ② 查询交易所实际持仓
-            okx_sz = self._get_okx_size()
+            exch_sz = self._get_exchange_size()
 
             # ③ 计算本地预期持仓
             opens = self.state.get("opens", 0)
@@ -449,14 +449,14 @@ class Strategy:
             local_sz = (opens - closes) * self.POSITION_SZ
 
             # ④ 检测零头（部分成交但未完全对齐）
-            frac = okx_sz % self.POSITION_SZ
+            frac = exch_sz % self.POSITION_SZ
             if frac > 1e-9:
                 self.log.error(f"检测到零头: {frac:.4f}，需人工处理")
                 self._notify(f"零头告警: {frac:.4f}，请在网页手动平仓", level="WARN")
                 return
 
             # ⑤ 对比（容忍 < POSITION_SZ 的差异）
-            diff = okx_sz - local_sz
+            diff = exch_sz - local_sz
 
             if abs(diff) < self.POSITION_SZ - 1e-9:
                 # 一致，补挂缺失的单

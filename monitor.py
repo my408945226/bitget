@@ -5,16 +5,19 @@
   ① 保证金率分级（信息/警告/严重/紧急）
   ② 资金费率（空头持仓在负费率时被吃利息）
   ③ 挂单形态探针（策略存活检测）：每个空头持仓应有「恰好 1 个 SELL + 至少 1 个 BUY」，
-     连续 N 次 tick 不满足 → 策略可能已停，告警
+     连续 N 次 tick 不满足 → 策略可能已停，告警。只检查有 state_short_pyramid_<sym>.pkl
+     的合约（金字塔策略托管），跳过手动/其它策略持仓避免误报。
   ④ 权益曲线写入 equity_log.csv
   ⑤ 每小时心跳
 
-用法: python monitor.py   （Ctrl+C 退出，建议 nohup/systemd 长驻）
+用法: python monitor.py   （Ctrl+C / SIGTERM 优雅退出，建议 nohup/systemd 长驻）
 """
 import time
 import os
 import csv
+import signal
 import logging
+from pathlib import Path
 from datetime import datetime
 
 try:
@@ -75,6 +78,11 @@ class AccountMonitor:
     INTERVAL_SEC = 60
     HEARTBEAT_SEC = 3600              # 每小时一条心跳
     ORDER_SHAPE_CONSECUTIVE = 3       # 挂单形态连续异常 N 次才告警
+    # 只检查由金字塔策略托管的合约（扫 state_short_pyramid_<sym>.pkl 自动识别），
+    # 避免对手动开仓 / 其它策略的持仓误报形态异常。False=检查所有非零持仓。
+    ORDER_SHAPE_ONLY_STRATEGY = True
+    STRATEGY_STATE_DIR = "."                       # 策略 pkl 落盘目录
+    STRATEGY_STATE_PREFIX = "state_short_pyramid_"  # pkl 文件名前缀
     THROTTLE_MGN = 600                # 保证金率告警节流 10 分钟
     THROTTLE_SHAPE = 1800             # 挂单形态告警节流 30 分钟
     THROTTLE_FUNDING = 3600           # 资金费率告警节流 1 小时
@@ -89,22 +97,36 @@ class AccountMonitor:
         self._last_heartbeat = 0.0
         self._tick_count = 0
         self._order_bad_streak = {}   # symbol -> 连续异常次数
+        self._stop = False
 
     # ------------------------------------------------------------------
+    def _setup_signals(self):
+        """SIGINT/SIGTERM → 优雅停止（systemd/nohup kill 时也能干净退出）"""
+        def _handle(*_):
+            self._stop = True
+        try:
+            signal.signal(signal.SIGINT, _handle)
+            signal.signal(signal.SIGTERM, _handle)
+        except (ValueError, AttributeError):
+            pass  # 非主线程或 Windows 不支持时忽略
+
     def run(self):
         """主循环"""
         self.log.info("监控启动")
+        self._setup_signals()
         self._send_msg("🟢 监控启动")
         self._ensure_csv_header()
-        try:
-            while True:
-                try:
-                    self.tick()
-                except Exception as e:
-                    self.log.error(f"tick 失败: {e}", exc_info=True)
-                time.sleep(self.INTERVAL_SEC)
-        except KeyboardInterrupt:
-            self.log.info("监控已停止")
+        while not self._stop:
+            try:
+                self.tick()
+            except Exception as e:
+                self.log.error(f"tick 失败: {e}", exc_info=True)
+            # 可中断睡眠：每秒检查停止标志，关停秒级响应
+            for _ in range(self.INTERVAL_SEC):
+                if self._stop:
+                    break
+                time.sleep(1)
+        self.log.info("监控已停止")
 
     def tick(self):
         """单次扫描"""
@@ -192,18 +214,46 @@ class AccountMonitor:
     # ------------------------------------------------------------------
     # ③ 挂单形态探针（策略存活检测）
     # ------------------------------------------------------------------
+    def _managed_instruments(self):
+        """扫策略状态目录，从 state_short_pyramid_<sym>.pkl 文件名提取被托管的合约。
+        无 pkl 的持仓视为手动/其它策略，不做形态检查。
+        返回 None 表示扫描失败 → 调用方回退为不过滤（全量检查）。
+        """
+        prefix = self.STRATEGY_STATE_PREFIX
+        try:
+            return {
+                p.stem[len(prefix):]
+                for p in Path(self.STRATEGY_STATE_DIR).glob(f"{prefix}*.pkl")
+                if p.stem.startswith(prefix) and p.stem[len(prefix):]
+            }
+        except OSError as e:
+            self.log.warning(f"[挂单形态] 扫描策略 pkl 失败，本轮按全量检查: {e}")
+            return None
+
     def _check_order_shape(self, positions: list):
         """每个空头持仓应有「恰好 1 个 SELL + 至少 1 个 BUY」。
 
         挂单是 GTC，策略进程死了挂单仍留在交易所但不再被移动/补挂，迟早漂移成
         畸形（SELL 成交后无人补 → 0 SELL 等）。用挂单形态当"策略是否还在维护网格"
         的探针。连续 N 次 tick 都异常才告警，过滤 refresh 撤挂空窗等瞬时态。
+
+        只检查有对应 pkl 的合约（金字塔策略托管），跳过手动/其它策略持仓避免误报。
+        策略死了 pkl 仍在磁盘 → 该合约仍被检查 → 网格漂移照样能告警（探针本意）。
         """
         if not positions:
             self._order_bad_streak.clear()
             return
 
         held = {p.get("symbol"): p for p in positions if p.get("symbol")}
+
+        if self.ORDER_SHAPE_ONLY_STRATEGY:
+            managed = self._managed_instruments()
+            if managed is not None:   # None=扫描失败，回退为不过滤
+                held = {s: p for s, p in held.items() if s in managed}
+
+        if not held:
+            self._order_bad_streak.clear()
+            return
 
         for sym, pos in held.items():
             orders = self.client.get_open_orders(sym)
