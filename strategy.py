@@ -153,7 +153,8 @@ class Strategy:
         self._buy_cancel_hits = {}   # px_key -> [被撤时间戳]
         self._buy_backoff = {}       # px_key -> 退避截止时间
         self.contract_info: dict = {}
-        self.last_reconcile_ts = 0.0
+        self.last_reconcile_ts = 0.0   # 主循环对账调度时间戳（每 60s）
+        self.last_fill_ts = 0.0        # 最近一次成交时间戳（对账防 race 专用，与调度分开）
         self.last_refresh_ts = 0.0
         self._lock = threading.RLock()
         self._running = True
@@ -404,15 +405,17 @@ class Strategy:
         self.on_fill(order)
 
     def _reconcile(self):
-        """定时对账（每 60s）- 先检查漏推送，再修复差异"""
-        # 防 race：最近 5s 内有成交或刷新，跳过
+        """对账入口：防 race（5s 内有成交/刷新则跳过）后持 RLock 调用，
+        与 on_fill 串行，防止 closes/opens 读改写竞态多算/漏算而留裸仓。
+        last_fill_ts 专记成交，与主循环调度用的 last_reconcile_ts 分开。"""
         now = time.time()
-        time_since_refresh = now - self.last_refresh_ts
-        time_since_fill = now - self.last_reconcile_ts
-
-        if time_since_refresh < 5 or time_since_fill < 5:
+        if now - self.last_refresh_ts < 5 or now - self.last_fill_ts < 5:
             return
+        with self._lock:
+            self._do_reconcile()
 
+    def _do_reconcile(self):
+        """对账主体（已在 RLock 内）- 先检查漏推送，再修复差异"""
         try:
             # ① 优先检查 WS 漏推送（补救已成交但未通知的订单）
             self._check_missed_fills()
@@ -573,7 +576,7 @@ class Strategy:
         self.state["opens"] += 1
         self.state["pending_sell_ord_id"] = None
         self.state["pending_sell_px"] = None
-        self.last_reconcile_ts = time.time()
+        self.last_fill_ts = time.time()
 
         n = max(0, self.state.get("opens", 0) - self.state.get("closes", 0))
         self._notify(f"加仓成交 | {self.cfg.symbol} | 成交价 {px:.6f} | 持仓 {n}单")
@@ -601,7 +604,7 @@ class Strategy:
 
         self.state["closes"] += 1
         self.state["pending_buys"].pop(ord_id, None)
-        self.last_reconcile_ts = time.time()
+        self.last_fill_ts = time.time()
 
         self._notify(f"平仓成交 | {self.cfg.symbol} | 成交价 {px:.6f} | 盈亏 {pnl:+.2f}")
         self._save()
@@ -642,7 +645,35 @@ class Strategy:
         self._refresh_orders()
 
     def _cycle_complete(self):
-        """一轮交易完成 - 清理所有挂单后退出"""
+        """一轮交易完成 - 清理所有挂单后退出。
+
+        退出前**必须**核对交易所实际持仓：opens==closes 只是本地账目，若对账/WS
+        竞态多算了 closes，会在实盘仍有持仓时误判完成。直接退出将留下无网格的裸空单
+        （TNSRUSDT 2026-06-21 事故）。故实盘 ≠ 0 时不退出，按实盘修正并重挂网格自愈。
+        """
+        exch_sz = self._get_exchange_size()
+        if exch_sz > 1e-9:
+            n_pos = max(1, round(exch_sz / self.POSITION_SZ))
+            frac = exch_sz % self.POSITION_SZ
+            self.log.error(f"一轮完成前发现实盘仍有 {exch_sz} 张持仓，取消退出，按实盘修正重挂网格")
+            if frac > 1e-9:
+                self._notify(f"⚠️ 平仓不彻底且有零头 {frac:.4f}，请手动核查 {self.cfg.symbol}", level="CRITICAL")
+            self._notify(f"⚠️ 平仓不彻底：实盘仍有 ~{n_pos} 单，已按实盘修正继续维护网格（防裸仓）", level="CRITICAL")
+            # 以交易所为准重置账目并重建 stack_top（同接管逻辑），撤旧挂单后重挂
+            self.state["opens"] = n_pos
+            self.state["closes"] = 0
+            self.state["pending_sell_ord_id"] = None
+            self.state["pending_sell_px"] = None
+            self.state["pending_buys"] = {}
+            det = self._get_position_detail()
+            if det.get("avg_price", 0) > 0:
+                self.state["stack_top"] = det["avg_price"]
+            self._save()
+            self._cancel_stale_pending_on_startup()
+            self._refresh_orders()
+            return
+
+        # 实盘确认为 0 → 正常清理退出
         # 撤销 SELL
         sell_id = self.state.get("pending_sell_ord_id")
         if sell_id:

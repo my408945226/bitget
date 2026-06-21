@@ -68,8 +68,10 @@ python3 monitor.py
 - **WebSocket 订单频道**（`ws_connect`）后台线程实时推 `orders` → `_on_ws_message` 归一化 → `on_fill`
   - 30s 心跳 ping；连接失败自动降级，仅靠对账兜底
 - **60s 定时对账 `_reconcile`**（`RECONCILE_SEC`）：①补 WS 漏推（`_check_missed_fills` 用 REST 查 filled 补发虚拟 on_fill）②查交易所实际持仓与本地 opens-closes 对比，差 ≥1 张自动修复（交易所为准）③零头（`okx_sz % POSITION_SZ`）→ WARN 要求人工平仓
-  - 防 race：最近 5s 内有成交/刷新则跳过本次对账
-- **`on_fill` 用 `RLock` 串行化**，防 WS + 对账并发重复挂单
+  - 防 race 两层：①入口 5s 内有成交(`last_fill_ts`)/刷新(`last_refresh_ts`)则跳过 ②对账主体 `_do_reconcile` **全程持 `RLock`**，与 `on_fill` 串行，防 closes/opens 读改写竞态多算
+  - **时间戳分离**：`last_fill_ts`（成交，防 race 用）vs `last_reconcile_ts`（主循环 60s 调度用），不可复用——复用会让成交把对账调度顶掉、race guard 也失效
+- **`on_fill` / `_do_reconcile` 共用 `RLock` 串行化**，防 WS + 对账并发重复挂单/重复计数
+- **`_cycle_complete` 退出前核对实盘持仓**：`opens==closes` 只是本地账目，若竞态多算 closes 会在实盘仍有仓时误判完成→直接退出留**裸空单**。故实盘 ≠ 0 时不退出，按实盘 `opens=n_pos/closes=0` 修正 + 重建 stack_top + 撤旧挂单重挂网格自愈
 
 ## 网格运行逻辑（`_refresh_orders`）
 
@@ -144,6 +146,7 @@ REST 每 60s 全量扫描（无 WS）：
 | WS 漏推兜底从不生效 | `_check_missed_fills` 用错字段 `orderStatus`/`avgPrice`（Bitget v3 是 `status`/`priceAvg`） | 兼容两种命名 `info.get("status") or info.get("orderStatus")`（已） |
 | 仓位已平却空转、甚至凭空重挂 SELL | `_reconcile` 修复 closes 后漏查 `opens==closes → _cycle_complete()` | 对账平到 opens==closes>0 即撤单 exit(0)，与 WS 平仓路径一致（已） |
 | 0 持仓凭空挂 SELL 重新开空 | `_ensure_orders_complete` 无视 n_pos 补 SELL | n_pos==0 直接 return 不补单（已） |
+| **一轮"完成"后留下无网格裸空单**（TNSRUSDT 2026-06-21） | ①对账与 WS `on_fill` 并发改 closes（`_reconcile` 没持锁）多算 1 ②`last_reconcile_ts` 被成交与调度复用，race guard 失效 ③`_cycle_complete` 只看 `opens==closes` 不核实盘→提前退出留裸仓 | ①`_do_reconcile` 全程持 `RLock` 与 on_fill 串行 ②拆出 `last_fill_ts` 专记成交 ③`_cycle_complete` 退出前查实盘，≠0 则按实盘修正重挂网格自愈（均已） |
 
 ## 退出码
 
