@@ -89,8 +89,8 @@ python3 monitor.py
 | CLI 参数 | 动作 |
 |---|---|
 | （默认无参数） | 市价 SELL 1 单，stack_top=市价，opens=1 |
-| `--initial-sell-px <px>` | 限价 SELL 1 单，stack_top=px，opens=0 等成交 |
-| `--adopt-sell-px <px>` | 基准价：stack_top=px，挂 SELL @ px×(1+grid)，opens=0 |
+| `--limit <px>` | 限价 SELL 1 单，stack_top=px，opens=0 等成交（旧名 `--initial-sell-px`） |
+| `--adopt <px>` | 基准价：stack_top=px，挂 SELL @ px×(1+grid)，opens=0（旧名 `--adopt-sell-px`） |
 
 启动时优先 `_adopt_position`：若交易所已有 short 持仓则接管（opens=`total/POSITION_SZ`），否则才起仓。
 

@@ -90,8 +90,8 @@ BUY₃ @ 94.12   （第 3 档平仓）
   ├─ 清理交易所遗留挂单
   ├─ 接管现有持仓 OR 起仓（三种模式）
   │   ├─ 默认：市价起仓 1 张
-  │   ├─ --initial-sell-px: 限价起仓
-  │   └─ --adopt-sell-px: 基准价起仓
+  │   ├─ --limit: 限价起仓
+  │   └─ --adopt: 基准价起仓
   └─ 挂初始网格（SELL + BUY 梯队）
 
 主循环 (run) - 双层防线
@@ -189,7 +189,7 @@ python -m strategy \
   --symbol BGBUSDT \
   --sz 4 \
   --grid 0.005 \
-  --initial-sell-px 1.80
+  --limit 1.80
 ```
 
 #### 模式 3：基准价起仓（自动偏移）
@@ -198,7 +198,7 @@ python -m strategy \
   --symbol BGBUSDT \
   --sz 4 \
   --grid 0.005 \
-  --adopt-sell-px 1.75
+  --adopt 1.75
 ```
 
 **完整参数示例**：
@@ -277,8 +277,8 @@ python -m strategy --symbol TONUSDT --sz 50 --grid 0.015
 | 参数 | 说明 | 何时使用 | 示例 |
 |------|------|---------|------|
 | **默认（无参数）** | 市价起仓 1 张 | 想立即入场 | （无） |
-| `--initial-sell-px` | 限价起仓，立即启动网格 | 等待特定价格 | `--initial-sell-px 1.80` |
-| `--adopt-sell-px` | 基准价起仓，自动往上偏移 | 用基准价做参考 | `--adopt-sell-px 1.75` |
+| `--limit` | 限价起仓，立即启动网格 | 等待特定价格 | `--limit 1.80` |
+| `--adopt` | 基准价起仓，自动往上偏移 | 用基准价做参考 | `--adopt 1.75` |
 
 **三种模式详解**：
 
@@ -293,11 +293,11 @@ python -m strategy \
 - **优点**：最快入场
 - **缺点**：可能遇到滑点
 
-#### 2️⃣ 限价模式（--initial-sell-px）
+#### 2️⃣ 限价模式（--limit）
 ```bash
 python -m strategy \
   --symbol BGBUSDT --sz 4 --grid 0.005 \
-  --initial-sell-px 1.80
+  --limit 1.80
 ```
 - **动作**：限价挂 1 张 @ 1.80，**网格立即启动**
 - **stack_top**：设置为 1.80（不等成交）
@@ -306,11 +306,11 @@ python -m strategy \
 - **优点**：控制入场价，网格无延迟
 - **缺点**：如果价格没有达到 1.80，SELL 可能永不成交
 
-#### 3️⃣ 基准价模式（--adopt-sell-px）
+#### 3️⃣ 基准价模式（--adopt）
 ```bash
 python -m strategy \
   --symbol BGBUSDT --sz 4 --grid 0.005 \
-  --adopt-sell-px 1.75
+  --adopt 1.75
 ```
 - **动作**：基准 1.75 自动往上偏移 0.5%（grid 幅度）→ SELL @ 1.7538
 - **stack_top**：设置为基准价 1.75（不是成交价）
@@ -321,7 +321,7 @@ python -m strategy \
 
 **模式优先级**（同时指定时）：
 ```
---adopt-sell-px > --initial-sell-px > 默认市价
+--adopt > --limit > 默认市价
 ```
 
 ### 风控参数（重要）

@@ -31,8 +31,8 @@ def parse_args() -> Config:
     parser.add_argument("--leverage", type=int, default=3)
     parser.add_argument("--interval", type=int, default=5)
     parser.add_argument("--max-notional", type=float, default=10000)
-    parser.add_argument("--initial-sell-px", type=float, default=0, help="限价起仓价格")
-    parser.add_argument("--adopt-sell-px", type=float, default=0, help="基准价（自动往上偏移）")
+    parser.add_argument("--limit", type=float, default=0, dest="initial_sell_px", help="限价起仓价格")
+    parser.add_argument("--adopt", type=float, default=0, dest="adopt_sell_px", help="基准价（自动往上偏移）")
 
     args = parser.parse_args()
     return Config(
