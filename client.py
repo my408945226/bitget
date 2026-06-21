@@ -318,6 +318,9 @@ class BitgetClient:
     # 登录签名: Base64(HMAC_SHA256(secretKey, timestamp + "GET" + "/user/verify"))
 
     WS_PRIVATE_URL = "wss://ws.bitget.com/v2/ws/private"
+    WS_PING_SEC = 20            # 应用层 ping 间隔（官方建议 30s，取 20s 更保险）
+    WS_PONG_TIMEOUT = 50        # 超过此秒数没收到任何消息/pong → 判定僵尸连接重连
+    WS_RECONNECT_MAX = 30       # 重连退避上限（秒）
 
     def _ws_login_sign(self, ts: str) -> str:
         """生成 WebSocket 登录签名"""
@@ -329,65 +332,112 @@ class BitgetClient:
         )
         return base64.b64encode(mac.digest()).decode("utf-8")
 
-    async def ws_connect(self, symbol: str, on_message):
-        """连接 WebSocket 并订阅订单频道（Order-Channel）
+    async def ws_connect(self, symbol: str, on_message,
+                         on_reconnect=None, should_stop=None):
+        """连接 WebSocket 并订阅订单频道（Order-Channel），带断线/僵尸自动重连。
         https://www.bitget.com/zh-CN/api-doc/contract/websocket/private/Order-Channel
-        on_message: async 回调，接收单个订单 dict（已含 status/orderId/priceAvg 等）
+
+        官方规则（websocket-intro）：客户端定时发字符串 "ping"、期待 "pong"；
+        **收不到 pong 即应重连**；服务器 2 分钟收不到 ping 才断开。故这里：
+          - 应用层每 WS_PING_SEC 发 "ping"
+          - 任何消息/pong 都刷新存活时间戳；超过 WS_PONG_TIMEOUT 无任何消息 →
+            判定为半开/僵尸连接，主动关闭并重连（光发 ping 不检测 pong 会静默丢消息）
+          - 关掉库自带协议级 ping（ping_interval=None），避免与应用层心跳互相干扰误关
+
+        on_message:   async 回调，接收单个订单 dict
+        on_reconnect: 可选，(重)连成功时同步回调，用于触发一次对账补上断连空窗期的成交
+        should_stop:  可选，返回 True 时退出重连循环（优雅停止）
         """
         if not websockets:
             self.log.warning("websockets 库未安装，降级到 REST 轮询")
             return
 
-        try:
-            async with websockets.connect(self.WS_PRIVATE_URL) as ws:
-                # ① 登录认证（op=login, args 为数组）
-                ts = str(int(time.time()))
-                login_msg = {
-                    "op": "login",
-                    "args": [{
-                        "apiKey": self.api_key,
-                        "passphrase": self.passphrase,
-                        "timestamp": ts,
-                        "sign": self._ws_login_sign(ts),
-                    }],
-                }
-                await ws.send(json.dumps(login_msg))
-                login_resp = await ws.recv()
-                self.log.debug(f"WS 登录: {login_resp}")
+        backoff = 1
+        while not (should_stop and should_stop()):
+            try:
+                async with websockets.connect(self.WS_PRIVATE_URL,
+                                              ping_interval=None,
+                                              close_timeout=5) as ws:
+                    # ① 登录认证（op=login, args 为数组）
+                    ts = str(int(time.time()))
+                    login_msg = {
+                        "op": "login",
+                        "args": [{
+                            "apiKey": self.api_key,
+                            "passphrase": self.passphrase,
+                            "timestamp": ts,
+                            "sign": self._ws_login_sign(ts),
+                        }],
+                    }
+                    await ws.send(json.dumps(login_msg))
+                    login_resp = await ws.recv()
+                    self.log.debug(f"WS 登录: {login_resp}")
+                    try:
+                        lr = json.loads(login_resp)
+                        if str(lr.get("code", "0")) not in ("0", "00000") and lr.get("event") != "login":
+                            raise RuntimeError(f"WS 登录失败: {login_resp}")
+                    except (ValueError, TypeError):
+                        pass
 
-                # ② 订阅订单频道（op=subscribe, args 为数组）
-                sub_msg = {
-                    "op": "subscribe",
-                    "args": [{"instType": "USDT-FUTURES", "channel": "orders", "instId": symbol}],
-                }
-                await ws.send(json.dumps(sub_msg))
-                self.log.info(f"WS 订阅 {symbol} orders")
+                    # ② 订阅订单频道（op=subscribe, args 为数组）
+                    sub_msg = {
+                        "op": "subscribe",
+                        "args": [{"instType": "USDT-FUTURES", "channel": "orders", "instId": symbol}],
+                    }
+                    await ws.send(json.dumps(sub_msg))
+                    self.log.info(f"WS 订阅 {symbol} orders")
 
-                # ③ 心跳协程：每 30s 发送 ping
-                async def _heartbeat():
-                    while True:
-                        await asyncio.sleep(30)
-                        await ws.send("ping")
-
-                hb_task = asyncio.create_task(_heartbeat())
-                try:
-                    # ④ 接收推送
-                    async for msg in ws:
-                        if msg == "pong":
-                            continue
+                    backoff = 1                       # 连上即重置退避
+                    last_seen = time.time()           # 最近一次收到任何消息/pong 的时间
+                    if on_reconnect:
                         try:
-                            data = json.loads(msg)
-                        except (ValueError, TypeError):
-                            continue
-                        # 仅处理 orders 频道的快照/更新推送
-                        if data.get("arg", {}).get("channel") != "orders":
-                            continue
-                        if data.get("action") not in ("snapshot", "update"):
-                            continue
-                        for item in data.get("data", []):
-                            await on_message(item)
-                finally:
-                    hb_task.cancel()
+                            on_reconnect()            # (重)连成功 → 触发对账补空窗
+                        except Exception as e:
+                            self.log.debug(f"on_reconnect 回调异常: {e}")
 
-        except Exception as e:
-            self.log.warning(f"WebSocket 连接失败，降级到 REST 轮询: {e}")
+                    # ③ 心跳协程：定时发 ping，并检测 pong/消息超时（僵尸连接）
+                    async def _heartbeat():
+                        while True:
+                            await asyncio.sleep(self.WS_PING_SEC)
+                            try:
+                                await ws.send("ping")
+                            except Exception:
+                                return
+                            if time.time() - last_seen > self.WS_PONG_TIMEOUT:
+                                self.log.warning(
+                                    f"WS {self.WS_PONG_TIMEOUT}s 无任何消息/pong，判定僵尸连接，主动重连")
+                                await ws.close()
+                                return
+
+                    hb_task = asyncio.create_task(_heartbeat())
+                    try:
+                        # ④ 接收推送
+                        async for msg in ws:
+                            last_seen = time.time()   # 收到任何消息都算连接存活
+                            if msg == "pong":
+                                continue
+                            try:
+                                data = json.loads(msg)
+                            except (ValueError, TypeError):
+                                continue
+                            # 仅处理 orders 频道的快照/更新推送
+                            if data.get("arg", {}).get("channel") != "orders":
+                                continue
+                            if data.get("action") not in ("snapshot", "update"):
+                                continue
+                            for item in data.get("data", []):
+                                await on_message(item)
+                    finally:
+                        hb_task.cancel()
+
+                # async with 正常退出（连接关闭）→ 进入重连
+                self.log.warning(f"WS 连接已关闭，{backoff}s 后重连")
+            except Exception as e:
+                self.log.warning(f"WS 连接异常: {e}，{backoff}s 后重连")
+
+            if should_stop and should_stop():
+                break
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2, self.WS_RECONNECT_MAX)
+
+        self.log.info("WS 重连循环已退出")

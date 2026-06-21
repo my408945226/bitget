@@ -378,13 +378,21 @@ class Strategy:
             pass
         return {}
 
+    def _on_ws_reconnect(self):
+        """WS (重)连成功回调：强制下次主循环立即对账，补上断连空窗期漏掉的成交"""
+        self.last_reconcile_ts = 0.0
+
     def _start_ws_thread(self):
-        """启动 WebSocket 线程（实时推送）"""
+        """启动 WebSocket 线程（实时推送，带自动重连）"""
         def ws_loop():
             try:
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
-                loop.run_until_complete(self.client.ws_connect(self.cfg.symbol, self._on_ws_message))
+                loop.run_until_complete(self.client.ws_connect(
+                    self.cfg.symbol, self._on_ws_message,
+                    on_reconnect=self._on_ws_reconnect,
+                    should_stop=lambda: not self._running,
+                ))
             except Exception as e:
                 self.log.warning(f"WebSocket 连接失败: {e}，依赖定时对账防护")
 

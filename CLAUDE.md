@@ -66,7 +66,9 @@ python3 monitor.py
 ## 成交驱动（WS 实时 + REST 对账双保险）
 
 - **WebSocket 订单频道**（`ws_connect`）后台线程实时推 `orders` → `_on_ws_message` 归一化 → `on_fill`
-  - 30s 心跳 ping；连接失败自动降级，仅靠对账兜底
+  - **带自动重连 + 僵尸检测**（`client.py`）：按官方规则「收不到 pong 即重连」，每 20s 发 `ping`，任何消息/pong 刷新存活时间戳，超 50s 无消息 → 判半开/僵尸连接主动关闭重连；关库自带协议 ping（`ping_interval=None`）避免与应用层心跳互斥；重连退避 1→30s
+  - **重连后回调 `on_reconnect`** → 置 `last_reconcile_ts=0` 强制立即对账，补断连空窗期漏掉的成交
+  - `should_stop` 优雅退出重连循环；库未装/彻底失败才降级为纯对账兜底
 - **60s 定时对账 `_reconcile`**（`RECONCILE_SEC`）：①补 WS 漏推（`_check_missed_fills` 用 REST 查 filled 补发虚拟 on_fill）②查交易所实际持仓与本地 opens-closes 对比，差 ≥1 张自动修复（交易所为准）③零头（`okx_sz % POSITION_SZ`）→ WARN 要求人工平仓
   - 防 race 两层：①入口 5s 内有成交(`last_fill_ts`)/刷新(`last_refresh_ts`)则跳过 ②对账主体 `_do_reconcile` **全程持 `RLock`**，与 `on_fill` 串行，防 closes/opens 读改写竞态多算
   - **时间戳分离**：`last_fill_ts`（成交，防 race 用）vs `last_reconcile_ts`（主循环 60s 调度用），不可复用——复用会让成交把对账调度顶掉、race guard 也失效
@@ -139,6 +141,7 @@ REST 每 60s 全量扫描（无 WS）：
 | 撤单报 `25204` | 订单已成交/已撤 | `_safe_cancel` 视为成功（已） |
 | BUY 被系统反复撤→限频 | 同价位无脑重挂 | 120s 内撤 ≥3 次→退避 180s（已） |
 | WS 漏推成交不动 | 推送丢失 | 60s 对账 `_check_missed_fills` REST 补发虚拟 on_fill（已） |
+| **频繁"对账漂移"、成交全靠对账补**（TNSRUSDT 2026-06-21） | 旧 `ws_connect` 只发 ping 不检测 pong，TCP 半开/被 NAT 静默掐断时 `async for` 永久阻塞、不报错不重连 → 僵尸连接静默丢消息（官方文档：收不到 pong 即应重连） | `ws_connect` 加应用层 ping + pong/消息超时判僵尸 → 主动重连（退避）+ 重连后强制对账补空窗（已） |
 | 部分成交零头进 stack | accFillSz 非整张 | 检测 `% POSITION_SZ` → WARN 要求人工平仓，不进 stack（已） |
 | WS+对账并发重复挂单 | 两路同时改状态 | `on_fill`/`_refresh_orders` 用 `RLock` 串行（已） |
 | TG 报警 400 丢失 | 裸 `<` 被当 HTML 标签 | 用 `≤`/`&lt;`（已） |
