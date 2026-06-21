@@ -168,8 +168,9 @@ class Strategy:
         self._notify("策略已手动停止")
 
     def _notify(self, msg: str, level: str = "INFO"):
-        """发送通知（带等级前缀；失败检测/紧急自救由 notifier 负责）"""
-        self.notifier.send(msg, level=level)
+        """发送通知（自动加 symbol 前缀，便于多策略共用一个 TG 时区分 token；
+        等级前缀/失败检测/紧急自救由 notifier 负责）"""
+        self.notifier.send(f"{self.cfg.symbol} | {msg}", level=level)
 
     def _save(self):
         """保存状态"""
@@ -253,7 +254,7 @@ class Strategy:
         self._refresh_orders()
 
         self._notify(
-            f"策略启动 | {self.cfg.symbol} | 数量 {self.POSITION_SZ} | "
+            f"策略启动 | 数量 {self.POSITION_SZ} | "
             f"网格 {self.GRID_PCT*100:.1f}% | 开仓 {open_mode}"
         )
         self._save()
@@ -579,7 +580,7 @@ class Strategy:
         self.last_fill_ts = time.time()
 
         n = max(0, self.state.get("opens", 0) - self.state.get("closes", 0))
-        self._notify(f"加仓成交 | {self.cfg.symbol} | 成交价 {px:.6f} | 持仓 {n}单")
+        self._notify(f"加仓成交 | 成交价 {px:.6f} | 持仓 {n}单")
         self._save()
         self._refresh_orders()
 
@@ -606,7 +607,7 @@ class Strategy:
         self.state["pending_buys"].pop(ord_id, None)
         self.last_fill_ts = time.time()
 
-        self._notify(f"平仓成交 | {self.cfg.symbol} | 成交价 {px:.6f} | 盈亏 {pnl:+.2f}")
+        self._notify(f"平仓成交 | 成交价 {px:.6f} | 盈亏 {pnl:+.2f}")
         self._save()
 
         # 检查一轮是否完成
@@ -657,7 +658,7 @@ class Strategy:
             frac = exch_sz % self.POSITION_SZ
             self.log.error(f"一轮完成前发现实盘仍有 {exch_sz} 张持仓，取消退出，按实盘修正重挂网格")
             if frac > 1e-9:
-                self._notify(f"⚠️ 平仓不彻底且有零头 {frac:.4f}，请手动核查 {self.cfg.symbol}", level="CRITICAL")
+                self._notify(f"⚠️ 平仓不彻底且有零头 {frac:.4f}，请手动核查", level="CRITICAL")
             self._notify(f"⚠️ 平仓不彻底：实盘仍有 ~{n_pos} 单，已按实盘修正继续维护网格（防裸仓）", level="CRITICAL")
             # 以交易所为准重置账目并重建 stack_top（同接管逻辑），撤旧挂单后重挂
             self.state["opens"] = n_pos
