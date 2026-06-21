@@ -706,6 +706,13 @@ class Strategy:
 
             n_pos = max(0, self.state.get("opens", 0) - self.state.get("closes", 0))
 
+            # 限价/基准起仓等待态：opens==0 且初始 SELL 还挂着等成交 → 原样不动。
+            # 初始 SELL 挂在 stack_top（--limit）或基准价×(1+grid)（--adopt）处，
+            # 若此时按 stack_top×(1+grid) 重算会把它误撤、又因 n_pos==0 不补，导致空挂。
+            # 等它成交后 _handle_sell_fill 置 opens=1 再走正常网格。
+            if n_pos == 0 and self.state.get("pending_sell_ord_id"):
+                return
+
             # ① SELL 唯一：永远只有 1 个 @ stack_top × (1+GRID)
             sell_px = self._round_px(stack_top * (1 + self.GRID_PCT))
             cur_sell_id = self.state.get("pending_sell_ord_id")

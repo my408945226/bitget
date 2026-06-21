@@ -146,6 +146,7 @@ REST 每 60s 全量扫描（无 WS）：
 | WS 漏推兜底从不生效 | `_check_missed_fills` 用错字段 `orderStatus`/`avgPrice`（Bitget v3 是 `status`/`priceAvg`） | 兼容两种命名 `info.get("status") or info.get("orderStatus")`（已） |
 | 仓位已平却空转、甚至凭空重挂 SELL | `_reconcile` 修复 closes 后漏查 `opens==closes → _cycle_complete()` | 对账平到 opens==closes>0 即撤单 exit(0)，与 WS 平仓路径一致（已） |
 | 0 持仓凭空挂 SELL 重新开空 | `_ensure_orders_complete` 无视 n_pos 补 SELL | n_pos==0 直接 return 不补单（已） |
+| **`--limit` 起仓后初始 SELL 被秒撤、策略空挂不触发**（TNSRUSDT 2026-06-21） | `_open` 限价模式把 SELL 挂在 `stack_top` 本身、`opens=0`，随后 `init` 调 `_refresh_orders` 按 `stack_top×(1+grid)` 重算，价格不符→撤掉初始 SELL，又因 `n_pos==0` 不补 | `_refresh_orders` 加等待态守卫：`n_pos==0 且有 pending_sell` 时原样不动，等成交后再走网格（已）。注：`--adopt` 因 SELL 挂在 `基准×(1+grid)` 与 refresh 期望一致，本无此问题 |
 | **一轮"完成"后留下无网格裸空单**（TNSRUSDT 2026-06-21） | ①对账与 WS `on_fill` 并发改 closes（`_reconcile` 没持锁）多算 1 ②`last_reconcile_ts` 被成交与调度复用，race guard 失效 ③`_cycle_complete` 只看 `opens==closes` 不核实盘→提前退出留裸仓 | ①`_do_reconcile` 全程持 `RLock` 与 on_fill 串行 ②拆出 `last_fill_ts` 专记成交 ③`_cycle_complete` 退出前查实盘，≠0 则按实盘修正重挂网格自愈（均已） |
 
 ## 退出码
