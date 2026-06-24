@@ -70,7 +70,9 @@ python3 monitor.py
   - **重连后回调 `on_reconnect`** → 置 `last_reconcile_ts=0` 强制立即对账，补断连空窗期漏掉的成交
   - `should_stop` 优雅退出重连循环；库未装/彻底失败才降级为纯对账兜底
 - **60s 定时对账 `_reconcile`**（`RECONCILE_SEC`）：①补 WS 漏推（`_check_missed_fills` 用 REST 查 filled 补发虚拟 on_fill）②查交易所实际持仓与本地 opens-closes 对比，差 ≥1 张自动修复（交易所为准）③零头（`okx_sz % POSITION_SZ`）→ WARN 要求人工平仓
-  - 防 race 两层：①入口 5s 内有成交(`last_fill_ts`)/刷新(`last_refresh_ts`)则跳过 ②对账主体 `_do_reconcile` **全程持 `RLock`**，与 `on_fill` 串行，防 closes/opens 读改写竞态多算
+  - **单一共享快照**：`_do_reconcile` 顶部一次性相邻取 `open_orders`+`positions`，`open_ids` 传给 `_check_missed_fills`、`exch_sz` 从同一持仓快照算，避免「订单列表 vs 持仓」两次异步 REST 时间差致同一笔被双算（FUTUUSDT 2026-06-24，见坑表/memory `bitget-reconcile-double-count`）
+  - **diff 修复摘 oid**：diff<0 时 `closes+=n` 前把不在 `open_ids` 的 BUY 从 `pending_buys` 摘掉，迟到的 WS 推送被 `on_fill` 幂等丢弃。原则：计数只走 missed_fill→on_fill 一条 oid 路径，diff 仅兜底真正外部漂移
+  - 防 race 两层：①**guard 在锁内判定**（`_reconcile` 把 5s 内有成交`last_fill_ts`/刷新`last_refresh_ts`则跳过的判断放进 `with RLock`，避免锁外通过 guard→等锁→拿锁时成交已发生仍跑对账的 TOCTOU）②对账主体 `_do_reconcile` **全程持 `RLock`**，与 `on_fill` 串行，防 closes/opens 读改写竞态多算
   - **时间戳分离**：`last_fill_ts`（成交，防 race 用）vs `last_reconcile_ts`（主循环 60s 调度用），不可复用——复用会让成交把对账调度顶掉、race guard 也失效
 - **`on_fill` / `_do_reconcile` 共用 `RLock` 串行化**，防 WS + 对账并发重复挂单/重复计数
 - **`_cycle_complete` 退出前核对实盘持仓**：`opens==closes` 只是本地账目，若竞态多算 closes 会在实盘仍有仓时误判完成→直接退出留**裸空单**。故实盘 ≠ 0 时不退出，按实盘 `opens=n_pos/closes=0` 修正 + 重建 stack_top + 撤旧挂单重挂网格自愈
@@ -151,6 +153,7 @@ REST 每 60s 全量扫描（无 WS）：
 | 0 持仓凭空挂 SELL 重新开空 | `_ensure_orders_complete` 无视 n_pos 补 SELL | n_pos==0 直接 return 不补单（已） |
 | **`--limit` 起仓后初始 SELL 被秒撤、策略空挂不触发**（TNSRUSDT 2026-06-21） | `_open` 限价模式把 SELL 挂在 `stack_top` 本身、`opens=0`，随后 `init` 调 `_refresh_orders` 按 `stack_top×(1+grid)` 重算，价格不符→撤掉初始 SELL，又因 `n_pos==0` 不补 | `_refresh_orders` 加等待态守卫：`n_pos==0 且有 pending_sell` 时原样不动，等成交后再走网格（已）。注：`--adopt` 因 SELL 挂在 `基准×(1+grid)` 与 refresh 期望一致，本无此问题 |
 | **一轮"完成"后留下无网格裸空单**（TNSRUSDT 2026-06-21） | ①对账与 WS `on_fill` 并发改 closes（`_reconcile` 没持锁）多算 1 ②`last_reconcile_ts` 被成交与调度复用，race guard 失效 ③`_cycle_complete` 只看 `opens==closes` 不核实盘→提前退出留裸仓 | ①`_do_reconcile` 全程持 `RLock` 与 on_fill 串行 ②拆出 `last_fill_ts` 专记成交 ③`_cycle_complete` 退出前查实盘，≠0 则按实盘修正重挂网格自愈（均已） |
+| **同一笔平仓被对账 diff 与 WS 各记一次 closes，下轮反手 opens+1 圆账**（FUTUUSDT 2026-06-24） | ①`_check_missed_fills` 自取 `get_open_orders`、diff 又自取 `get_position`，两次异步 REST 间「持仓已减、挂单列表仍列着该 BUY」有时间差→漏推检查跳过、diff 记 closes 且不摘 oid ②diff 修复不从 `pending_buys` 摘已成交 oid→迟到 WS 推送再记一次 ③race guard 在锁外判 `last_fill_ts`，TOCTOU 失效 | 照 OKX 版 `_do_reconcile` 结构：①顶部一次性相邻取 open_orders+positions **共享快照**，`open_ids` 传给 `_check_missed_fills` ②diff<0 时 `closes+=n` 前把不在 `open_ids` 的 BUY 从 `pending_buys` 摘掉→`on_fill` 幂等丢弃迟到推送 ③guard 移进 `with self._lock:` 内（均已）。原则：计数只走 missed_fill→on_fill 一条 oid 路径，diff 仅兜底真正外部漂移 |
 
 ## 退出码
 

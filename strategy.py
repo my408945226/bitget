@@ -416,21 +416,41 @@ class Strategy:
     def _reconcile(self):
         """对账入口：防 race（5s 内有成交/刷新则跳过）后持 RLock 调用，
         与 on_fill 串行，防止 closes/opens 读改写竞态多算/漏算而留裸仓。
-        last_fill_ts 专记成交，与主循环调度用的 last_reconcile_ts 分开。"""
-        now = time.time()
-        if now - self.last_refresh_ts < 5 or now - self.last_fill_ts < 5:
-            return
+        last_fill_ts 专记成交，与主循环调度用的 last_reconcile_ts 分开。
+
+        ★ race guard 必须在锁内判定：若放在锁外，on_fill 正在处理成交（持锁）时
+        本函数可能先通过 guard（last_fill_ts 尚未更新）再阻塞等锁，等拿到锁时成交
+        已发生却照样跑对账 → 与 WS 双算（FUTUUSDT 2026-06-24 事故）。对齐 OKX 版
+        on_tick 的 `with lock: maybe_reconcile`。"""
         with self._lock:
+            now = time.time()
+            if now - self.last_refresh_ts < 5 or now - self.last_fill_ts < 5:
+                return
             self._do_reconcile()
 
     def _do_reconcile(self):
         """对账主体（已在 RLock 内）- 先检查漏推送，再修复差异"""
         try:
-            # ① 优先检查 WS 漏推送（补救已成交但未通知的订单）
-            self._check_missed_fills()
+            # ★ 单一共享快照：一次性、相邻地取「挂单 + 持仓」，供漏推检查与 diff 复用。
+            # 旧实现里 _check_missed_fills 自取 get_open_orders、diff 又自取 get_position，
+            # 两次不同步的 REST 读之间「订单列表 vs 持仓」存在时间差：持仓已减、挂单列表
+            # 仍列着该 BUY → 漏推检查跳过、diff 却记 closes 且不摘 oid → 稍后 WS 推送再记
+            # 一次 = 双算（FUTUUSDT 2026-06-24）。对齐 OKX 版共享快照结构。
+            try:
+                open_orders = self.client.get_open_orders(self.cfg.symbol)
+                positions = self.client.get_position(self.cfg.symbol).get("data", [])
+            except Exception as e:
+                self.log.warning(f"对账查询失败，本轮跳过: {e}")
+                return
+            open_ids = {o.get("orderId") for o in open_orders}
+            exch_sz = 0.0
+            for p in positions:
+                if p.get("holdSide") == "short":
+                    exch_sz = float(p.get("total") or 0)
+                    break
 
-            # ② 查询交易所实际持仓
-            exch_sz = self._get_exchange_size()
+            # ① 优先检查 WS 漏推送（用共享挂单快照；已成交→补发 on_fill 并 pop oid）
+            self._check_missed_fills(open_ids)
 
             # ③ 计算本地预期持仓
             opens = self.state.get("opens", 0)
@@ -456,6 +476,12 @@ class Strategy:
             if diff < 0:
                 # 交易所 < 本地：部分被平 → closes++
                 n_closed = round(-diff / self.POSITION_SZ)
+                # ★ 摘掉已不在交易所挂单列表里的 BUY（= 已成交/已撤的 oid），防止稍后到达
+                # 的 WS 推送对同一笔再记一次 closes。摘除后 on_fill 的「非追踪订单直接 return」
+                # 幂等丢弃这些迟到推送（FUTUUSDT 2026-06-24 双算根因修复）。
+                for oid in [o for o in list(self.state.get("pending_buys", {}).keys())
+                            if o not in open_ids]:
+                    self.state["pending_buys"].pop(oid, None)
                 self.state["closes"] += n_closed
                 self.log.warning(f"对账修复(平): closes+{n_closed}")
                 self._notify(f"对账: 平仓 {n_closed} 张")
@@ -509,10 +535,15 @@ class Strategy:
         # 检查 BUY
         self._refresh_orders()
 
-    def _check_missed_fills(self):
-        """检查 WS 漏推送（补救已成交但漏推的订单）"""
+    def _check_missed_fills(self, open_ids=None):
+        """检查 WS 漏推送（补救已成交但漏推的订单）
+
+        :param open_ids: 可选的交易所挂单 id 集合（对账传入共享快照，避免重复 REST 读、
+                         也避免与 diff 的持仓读不同步）。为 None 时自取（兼容旧调用）。
+        """
         try:
-            open_ids = {o.get("orderId") for o in self.client.get_open_orders(self.cfg.symbol)}
+            if open_ids is None:
+                open_ids = {o.get("orderId") for o in self.client.get_open_orders(self.cfg.symbol)}
 
             # 检查 SELL（Bitget v3 字段为 status/priceAvg，兼容 orderStatus/avgPrice 命名）
             sell_id = self.state.get("pending_sell_ord_id")
