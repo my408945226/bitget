@@ -636,14 +636,22 @@ class Strategy:
         self._refresh_orders()
 
     def _handle_buy_fill(self, order: dict):
-        """BUY 成交 → 平仓"""
+        """BUY 成交 → 平仓（与 OKX 版 _handle_close_filled 一致）"""
         ord_id = order.get("ordId")
         px = float(order.get("avgPx") or 0)
-        entry_px = self.state.get("stack_top", 0)
+        # 固定配对入场价：取挂单时记录的 entry_px（不可变），缺失才回退 stack_top。
+        # 旧实现误用 stack_top 当入场价 → PnL 与盈亏统计失真。
+        buy_info = self.state.get("pending_buys", {}).get(ord_id, {})
+        entry_px = float(buy_info.get("entry_px") or 0) or self.state.get("stack_top", 0)
         pnl = (entry_px - px) * self.POSITION_SZ
 
         self.state["closes"] += 1
         self.state["pending_buys"].pop(ord_id, None)
+        # ★ BUY 平仓成交 → stack_top 下移到成交价，使下一个加仓 SELL 重新锚定在
+        # px×(1+grid) 跟随行情下移（与 OKX 一致）。旧实现漏了这步：stack_top 冻结在
+        # 最高 SELL 价，加仓网格脱离行情、错失下行带的再做空 → 持续亏钱。
+        if px > 0:
+            self.state["stack_top"] = px
         self.last_fill_ts = time.time()
 
         self._notify(f"平仓成交 | 成交价 {px:.6f} | 盈亏 {pnl:+.2f}")

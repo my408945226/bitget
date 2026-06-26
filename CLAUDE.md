@@ -84,7 +84,7 @@ python3 monitor.py
 - **BUY 梯队**：depth = `min(持仓张数, MAX_BUYS=60)`，几何价位 `stack_top × (1-grid)^i`，
   `reduceOnly` 固定配对单（`entry_px` 记录后永不改动）
 - **SELL 成交** → `stack_top=成交价`, opens++, refresh
-- **BUY 成交** → closes++，一轮完成（opens==closes>0）则 `_cycle_complete` 撤所有单 + `sys.exit(0)`
+- **BUY 成交** → `stack_top=成交价`（下移，使加仓 SELL 重新锚定 `成交价×(1+grid)` 跟随行情下移，与 OKX `_handle_close_filled` 一致；漏此步会让 SELL 冻结在最高价、网格脱离行情而亏钱），closes++，PnL 用该 BUY 挂单时记录的 `entry_px`（非 stack_top）；一轮完成（opens==closes>0）则 `_cycle_complete` 撤所有单 + `sys.exit(0)`
 - **BUY 被系统撤** → 退避计数：同价位 120s 窗口被撤 ≥3 次 → 退避 180s 不挂（`_note_buy_cancel`/`_in_backoff`），避免无脑重挂打限频
 - **`_place_sell` 强制单例**：检测到已有 SELL → `sys.exit(1)`（防双 SELL bug）
 
