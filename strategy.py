@@ -1,5 +1,6 @@
 """Bitget 金字塔做空策略"""
 import sys
+import math
 import time
 import signal
 import threading
@@ -167,10 +168,31 @@ class Strategy:
         self._running = False
         self._notify("策略已手动停止")
 
-    def _notify(self, msg: str, level: str = "INFO"):
+    def _notify(self, msg: str, level: str = "INFO",
+                dedup_key: str = None, throttle_sec: int = None):
         """发送通知（自动加 symbol 前缀，便于多策略共用一个 TG 时区分 token；
-        等级前缀/失败检测/紧急自救由 notifier 负责）"""
-        self.notifier.send(f"{self.cfg.symbol} | {msg}", level=level)
+        等级前缀/失败检测/紧急自救由 notifier 负责）。
+        dedup_key+throttle_sec：同 key 在冷却期内只发一次，期间压制次数累计到下条，
+        用于会重复触发的告警（如每 60s 对账的零头告警）防刷屏。"""
+        self.notifier.send(f"{self.cfg.symbol} | {msg}", level=level,
+                           dedup_key=dedup_key, throttle_sec=throttle_sec)
+
+    def _n_and_remainder(self, exch_size: float):
+        """返回 (整数张数 N, 零头 remainder)。对齐 OKX 版 `_n_and_remainder`。
+        关键：浮点除法 0.09/0.01=8.999... 被 floor 成 8 是个长期 bug。
+        若 raw 非常接近整数（|raw-round(raw)|<1e-6）视为整除，否则 floor，多出部分为零头。"""
+        if self.POSITION_SZ <= 0:
+            return (0, exch_size)
+        raw = exch_size / self.POSITION_SZ
+        rounded = round(raw)
+        if abs(raw - rounded) < 1e-6 and rounded >= 0:
+            n = int(rounded)
+        else:
+            n = max(0, math.floor(raw))
+        remainder = exch_size - n * self.POSITION_SZ
+        if abs(remainder) < 1e-9:
+            remainder = 0.0
+        return (n, remainder)
 
     def _save(self):
         """保存状态"""
@@ -457,15 +479,19 @@ class Strategy:
             closes = self.state.get("closes", 0)
             local_sz = (opens - closes) * self.POSITION_SZ
 
-            # ④ 检测零头（部分成交但未完全对齐）
-            frac = exch_sz % self.POSITION_SZ
+            # ④ 检测零头（部分成交但未完全对齐）。对齐 OKX 版理念：
+            #    零头不进 stack 但**不中断对账**——仅按整张部分继续修复 diff，
+            #    零头留在交易所等人工平掉。告警带 dedup_key + 1h 节流防每 60s 刷屏
+            #    （旧实现无 dedup、且 return 掉对账，导致零头存在期间「刷屏 + 网格停摆」）。
+            n_exch, frac = self._n_and_remainder(exch_sz)
             if frac > 1e-9:
-                self.log.error(f"检测到零头: {frac:.4f}，需人工处理")
-                self._notify(f"零头告警: {frac:.4f}，请在网页手动平仓", level="WARN")
-                return
+                self.log.error(f"检测到零头: {frac:.4f}（整张 {n_exch}），按整张部分继续对账")
+                self._notify(f"零头告警: {frac:.4f}，请在网页手动平仓（不影响网格）",
+                             level="WARN", dedup_key="remainder", throttle_sec=3600)
 
-            # ⑤ 对比（容忍 < POSITION_SZ 的差异）
-            diff = exch_sz - local_sz
+            # ⑤ 对比（只按整张部分；容忍 < POSITION_SZ 的差异）
+            effective_exch = n_exch * self.POSITION_SZ
+            diff = effective_exch - local_sz
 
             if abs(diff) < self.POSITION_SZ - 1e-9:
                 # 一致，补挂缺失的单
