@@ -732,7 +732,7 @@ class Strategy:
         self.state["pending_buys"] = {}
         self._save()
 
-        self._notify("一轮做空完成，所有挂单已清理")
+        self._notify("一轮做空完成，所有挂单已清理", level="TRADE")
         sys.exit(0)
 
     def _refresh_orders(self):
