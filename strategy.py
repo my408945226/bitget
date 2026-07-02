@@ -797,6 +797,11 @@ class Strategy:
                     if not self._safe_cancel(cur_sell_id):
                         self.log.error(f"撤 SELL 失败: {cur_sell_id}，快速失败")
                         sys.exit(1)
+                    # ★ 撤单成功后必须立即清 pending_sell_*，否则紧接着的 _place_sell
+                    # 会读到旧 id 误判「多个 SELL」而 sys.exit(1)（BGBUSDT 2026-07-02）。
+                    # 对齐 OKX _refresh_sell_only_locked：撤单直后即置 None 再挂新单。
+                    self.state["pending_sell_ord_id"] = None
+                    self.state["pending_sell_px"] = None
                 if n_pos > 0:
                     self._place_sell(sell_px)
 
