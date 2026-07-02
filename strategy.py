@@ -76,6 +76,7 @@ class State(dict):
         self["stack_top"] = 0.0
         self["opens"] = 0
         self["closes"] = 0
+        self["total_realized_pnl"] = 0.0
         self["pending_sell_ord_id"] = None
         self["pending_sell_px"] = None
         self["pending_buys"] = {}
@@ -645,7 +646,12 @@ class Strategy:
         self.last_fill_ts = time.time()
 
         n = max(0, self.state.get("opens", 0) - self.state.get("closes", 0))
-        self._notify(f"加仓成交 | 成交价 {px:.6f} | 持仓 {n}单")
+        self._notify(
+            f"🔻 已加仓第 {n} 单\n"
+            f"成交价: {px:.6f}\n"
+            f"stack_top: {px:.6f}",
+            level="TRADE",
+        )
         self._save()
         self._refresh_orders()
 
@@ -678,9 +684,18 @@ class Strategy:
         # 最高 SELL 价，加仓网格脱离行情、错失下行带的再做空 → 持续亏钱。
         if px > 0:
             self.state["stack_top"] = px
+        self.state["total_realized_pnl"] = self.state.get("total_realized_pnl", 0.0) + pnl
         self.last_fill_ts = time.time()
 
-        self._notify(f"平仓成交 | 成交价 {px:.6f} | 盈亏 {pnl:+.2f}")
+        n = max(0, self.state.get("opens", 0) - self.state.get("closes", 0))
+        self._notify(
+            f"🔺 已平 1 单\n"
+            f"入场: {entry_px:.6f} → 出场: {px:.6f}\n"
+            f"单张盈亏: {pnl:+.4f} USDT\n"
+            f"剩余持仓: {n} 单 | stack_top: {px:.6f}\n"
+            f"累计已实现: {self.state['total_realized_pnl']:+.4f} USDT",
+            level="TRADE",
+        )
         self._save()
 
         # 检查一轮是否完成
