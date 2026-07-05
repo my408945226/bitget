@@ -480,6 +480,18 @@ class Strategy:
             closes = self.state.get("closes", 0)
             local_sz = (opens - closes) * self.POSITION_SZ
 
+            # ★ 闸门：交易所持仓≈0 而本地仍有仓 → 视为一轮已平完（手动平 / 被强平 /
+            # WS 长断漏推最后几笔）。直接收尾退出，**绝不再按本地账目补挂**。
+            # 这是防「WS 长断→本地账目滞后→按虚高 n_pos 疯狂重挂 reduceOnly 单打限频」
+            # 暴走的核心闸门（MIRAUSDT 2026-07-05 一小时暴走）。对齐 OKX
+            # _detect_and_handle_manual_close：okx_size<eps 且 local>0 即收尾。
+            local_pos = opens - closes
+            if exch_sz < 1e-9 and local_pos > 0:
+                self.log.warning(f"交易所持仓=0 而本地仍记 {local_pos} 单 → 判定一轮已平完，收尾退出（不补挂）")
+                self._notify(f"交易所持仓=0（本地仍记 {local_pos} 单）→ 一轮结束收尾，撤所有挂单", level="WARN")
+                self._cycle_complete()
+                return
+
             # ④ 检测零头（部分成交但未完全对齐）。对齐 OKX 版理念：
             #    零头不进 stack 但**不中断对账**——仅按整张部分继续修复 diff，
             #    零头留在交易所等人工平掉。告警带 dedup_key + 1h 节流防每 60s 刷屏
@@ -576,7 +588,8 @@ class Strategy:
             sell_id = self.state.get("pending_sell_ord_id")
             if sell_id and sell_id not in open_ids:
                 info = self.client.get_order_info(self.cfg.symbol, sell_id)
-                if (info.get("status") or info.get("orderStatus")) == "filled":
+                st = info.get("status") or info.get("orderStatus")
+                if st == "filled":
                     # 补救：补推一个虚拟的 on_fill 事件
                     fake_order = {
                         "ordId": sell_id,
@@ -585,12 +598,21 @@ class Strategy:
                                   or self.state.get("pending_sell_px")),
                     }
                     self.on_fill(fake_order)
+                elif st in ("canceled", "cancelled"):
+                    # 交易所已撤 → 清本地引用，防僵尸单堆积（对齐 OKX
+                    # _check_order_fill_status）。查不到/限频返回空 dict 时不动，
+                    # 避免误删仍活着的单，留待下轮或 WS 重连兜底。
+                    self.log.warning(f"[漏推] SELL {sell_id} 已撤，清本地引用")
+                    self.state["pending_sell_ord_id"] = None
+                    self.state["pending_sell_px"] = None
+                    self._save()
 
             # 检查 BUY
             for oid in list(self.state.get("pending_buys", {}).keys()):
                 if oid not in open_ids:
                     info = self.client.get_order_info(self.cfg.symbol, oid)
-                    if (info.get("status") or info.get("orderStatus")) == "filled":
+                    st = info.get("status") or info.get("orderStatus")
+                    if st == "filled":
                         # 补救：补推一个虚拟的 on_fill 事件
                         fake_order = {
                             "ordId": oid,
@@ -598,6 +620,20 @@ class Strategy:
                             "avgPx": info.get("priceAvg") or info.get("avgPrice"),
                         }
                         self.on_fill(fake_order)
+                    elif st in ("canceled", "cancelled"):
+                        # 交易所已撤 → 清本地引用（防 pending_buys 堆积僵尸单）
+                        re_px = float(self.state.get("pending_buys", {})
+                                      .get(oid, {}).get("target_px") or 0)
+                        self.log.warning(f"[漏推] BUY {oid} 已撤，清本地引用")
+                        self.state["pending_buys"].pop(oid, None)
+                        self._save()
+                        # 同档反复被撤 → 退避，防疯狂重挂打限频。WS 僵尸期收不到 canceled
+                        # 推送、退避永不触发正是 MIRAUSDT 2026-07-05 暴走的漏洞；这里让对账
+                        # 的撤单路径也走退避计数（refresh 的 _in_backoff 会跳过退避档）。
+                        if re_px > 0 and self._note_buy_cancel(re_px):
+                            self.log.error(f"BUY @{re_px:.6f} 频繁被撤，退避 {self.BUY_CANCEL_BACKOFF_SEC}s")
+                            self._notify(f"BUY @{re_px:.6f} 频繁被系统撤，退避 {self.BUY_CANCEL_BACKOFF_SEC}s",
+                                         level="WARN", dedup_key=f"buy_backoff_{re_px:.6f}", throttle_sec=300)
 
         except Exception as e:
             self.log.debug(f"漏推送检测异常: {e}")
@@ -935,6 +971,21 @@ class Strategy:
             # 网络/异常同样不退出，等下次重试
             self.log.warning(f"SELL 挂单异常(不降级): {e}")
 
+    @staticmethod
+    def _is_position_insufficient(msg: str) -> bool:
+        """启发式判断拒单是否为「reduceOnly 超量 / 无可平仓位」。命中→本地账目比
+        交易所虚高，应弹栈收敛而非重挂。关键词从严，宁漏判勿误判（对齐 OKX
+        _is_position_insufficient_error）。"""
+        if not msg:
+            return False
+        r = str(msg).lower()
+        keywords = (
+            "reduce only", "reduceonly", "reduce-only",
+            "no position", "position not", "insufficient position", "exceed",
+            "仓位不足", "无可平", "超过可平", "可平数量", "平仓数量", "仓位不存在",
+        )
+        return any(k in r for k in keywords)
+
     def _place_buy(self, entry: float, px: float):
         """挂BUY（原则：固定配对，entry_px 永不改动）"""
         try:
@@ -952,8 +1003,17 @@ class Strategy:
                         "entry_px": entry,   # 对应的 SELL 价格（不可变）
                         "target_px": px      # BUY 价格
                     }
+            elif self._is_position_insufficient(resp.get("msg")):
+                # reduceOnly 超量（交易所实际持仓 < 本地记账）→ 弹栈减账目，让本地
+                # 向交易所收敛，不再重挂（对齐 OKX _pop_stack_entry）。防「账目虚高→
+                # 挂超量 reduceOnly→被拒→重挂」死循环打限频（MIRAUSDT 2026-07-05）。
+                if self.state.get("opens", 0) - self.state.get("closes", 0) > 0:
+                    self.state["closes"] += 1
+                    self._save()
+                    self.log.warning(f"BUY 被拒(仓位不足)→弹栈 closes+1，剩余 "
+                                     f"{max(0, self.state['opens']-self.state['closes'])} 单: {resp.get('msg')}")
             else:
-                # BUY 挂单失败 → 记录但继续（可能是价格穿过等）
+                # 其他原因（价格穿过等）→ 记录但继续
                 self.log.warning(f"BUY 挂单失败: {resp.get('msg')}")
 
         except Exception as e:
