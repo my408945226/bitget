@@ -72,6 +72,7 @@ python3 monitor.py
 - **60s 定时对账 `_reconcile`**（`RECONCILE_SEC`）：①补 WS 漏推（`_check_missed_fills` 用 REST 查 filled 补发虚拟 on_fill）②查交易所实际持仓与本地 opens-closes 对比，差 ≥1 张自动修复（交易所为准）③零头（`okx_sz % POSITION_SZ`）→ WARN 要求人工平仓
   - **单一共享快照**：`_do_reconcile` 顶部一次性相邻取 `open_orders`+`positions`，`open_ids` 传给 `_check_missed_fills`、`exch_sz` 从同一持仓快照算，避免「订单列表 vs 持仓」两次异步 REST 时间差致同一笔被双算（FUTUUSDT 2026-06-24，见坑表/memory `bitget-reconcile-double-count`）
   - **diff 修复摘 oid**：diff<0 时 `closes+=n` 前把不在 `open_ids` 的 BUY 从 `pending_buys` 摘掉，迟到的 WS 推送被 `on_fill` 幂等丢弃。原则：计数只走 missed_fill→on_fill 一条 oid 路径，diff 仅兜底真正外部漂移
+  - **diff 修复平仓必须下移 stack_top**：diff 路径拿不到成交价，用当前市价重锚（仅在市价 < stack_top 时下移，不上抬）。否则 oid 丢失时全部平仓走 diff、stack_top 锚死高位、SELL 不跟行情=网格冻结亏钱（REDUSDT 2026-07-05）。OKX 对应：`_handle_missed_fill` 的 `stack_top=fill_px`
   - 防 race 两层：①**guard 在锁内判定**（`_reconcile` 把 5s 内有成交`last_fill_ts`/刷新`last_refresh_ts`则跳过的判断放进 `with RLock`，避免锁外通过 guard→等锁→拿锁时成交已发生仍跑对账的 TOCTOU）②对账主体 `_do_reconcile` **全程持 `RLock`**，与 `on_fill` 串行，防 closes/opens 读改写竞态多算
   - **时间戳分离**：`last_fill_ts`（成交，防 race 用）vs `last_reconcile_ts`（主循环 60s 调度用），不可复用——复用会让成交把对账调度顶掉、race guard 也失效
 - **`on_fill` / `_do_reconcile` 共用 `RLock` 串行化**，防 WS + 对账并发重复挂单/重复计数

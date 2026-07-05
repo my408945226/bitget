@@ -522,8 +522,19 @@ class Strategy:
                             if o not in open_ids]:
                     self.state["pending_buys"].pop(oid, None)
                 self.state["closes"] += n_closed
+                # ★ diff 修复平仓也必须下移 stack_top（对齐 OKX「stack_top=最近成交价」：
+                # OKX 漏推平仓走 _handle_missed_fill 会 stack_top=fill_px，Bitget 若 oid
+                # 丢失全落到 diff 路径，旧实现不动 stack_top → SELL 锚死高位、网格冻结
+                # 亏钱（REDUSDT 2026-07-05 全部平仓走 diff、stack_top 从未下移）。
+                # diff 路径拿不到成交价，用当前市价重锚（BUY 平仓=价格已回落，市价≈成交价）；
+                # 仅在市价 < stack_top 时下移，绝不上抬锚点。
+                mkt_px = self.client.get_price(self.cfg.symbol)
+                old_top = self.state.get("stack_top", 0)
+                if mkt_px > 0 and mkt_px < old_top:
+                    self.state["stack_top"] = mkt_px
+                    self.log.warning(f"对账修复(平): stack_top 重锚 {old_top:.6f} → {mkt_px:.6f}")
                 self.log.warning(f"对账修复(平): closes+{n_closed}")
-                self._notify(f"对账: 平仓 {n_closed} 张")
+                self._notify(f"对账: 平仓 {n_closed} 张 | stack_top {self.state.get('stack_top', 0):.6f}")
 
             elif diff > 0:
                 # 交易所 > 本地：外部加仓 → opens++
