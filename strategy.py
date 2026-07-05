@@ -964,7 +964,9 @@ class Strategy:
                 order_type="limit", cl_ord_id=_gen_cl_ord_id("S")
             )
             if resp.get("code") == "00000":
-                oid = resp.get("data", {}).get("orderId")
+                oid = self._extract_ord_id(resp)
+                if not oid:
+                    self.log.error(f"SELL 挂单成功但提取不到 orderId！resp={resp}")
                 self.state["pending_sell_ord_id"] = oid
                 self.state["pending_sell_px"] = px
                 self._save()
@@ -976,6 +978,17 @@ class Strategy:
         except Exception as e:
             # 网络/异常同样不退出，等下次重试
             self.log.warning(f"SELL 挂单异常(不降级): {e}")
+
+    @staticmethod
+    def _extract_ord_id(resp: dict):
+        """从下单响应稳健提取 orderId：兼容 data 为 dict 或 list（部分接口/单型返回
+        list）、键名 orderId 或 ordId。取不到返回 None（调用方据此告警）。"""
+        data = resp.get("data")
+        if isinstance(data, list):
+            data = data[0] if data else {}
+        if not isinstance(data, dict):
+            return None
+        return data.get("orderId") or data.get("ordId")
 
     @staticmethod
     def _is_position_insufficient(msg: str) -> bool:
@@ -1000,7 +1013,7 @@ class Strategy:
                 order_type="limit", reduce_only=True, cl_ord_id=_gen_cl_ord_id("B")
             )
             if resp.get("code") == "00000":
-                oid = resp.get("data", {}).get("orderId")
+                oid = self._extract_ord_id(resp)
                 if oid:
                     if "pending_buys" not in self.state:
                         self.state["pending_buys"] = {}
@@ -1009,6 +1022,11 @@ class Strategy:
                         "entry_px": entry,   # 对应的 SELL 价格（不可变）
                         "target_px": px      # BUY 价格
                     }
+                else:
+                    # 挂单成功却提取不到 orderId → 无法进 pending_buys 追踪，该 BUY 成交
+                    # 时 WS on_fill 会当「非追踪订单」丢弃，平仓只能靠对账兜底（REDUSDT
+                    # 2026-07-05：BUY 平仓全走对账、从不走 WS，正是此症）。dump resp 定位。
+                    self.log.error(f"BUY 挂单成功但提取不到 orderId，无法追踪！resp={resp}")
             elif self._is_position_insufficient(resp.get("msg")):
                 # reduceOnly 超量（交易所实际持仓 < 本地记账）→ 弹栈减账目，让本地
                 # 向交易所收敛，不再重挂（对齐 OKX _pop_stack_entry）。防「账目虚高→
