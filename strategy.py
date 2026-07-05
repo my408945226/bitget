@@ -942,11 +942,17 @@ class Strategy:
 
     def _place_sell(self, px: float):
         """挂SELL（原则：SELL 唯一，永远只有 1 个）"""
-        # 强制检查：不能同时有 2 个 SELL
+        # SELL 唯一：若已有挂着的 SELL，先撤掉再挂新，保证单例（对齐 OKX
+        # _refresh_sell_only_locked 的「撤旧→清引用→挂新」）。旧实现在此 sys.exit(1)
+        # 自杀——任何竞态/补挂路径（如 _ensure_orders_complete 不清 id 直接调本函数）
+        # 重入都会误报「多个 SELL」杀进程、留下无网格裸空单（VELODROMEUSDT
+        # 2026-07-04 加仓后退出）。OKX 从不因此自杀，改为撤旧挂新。
         old_sell_id = self.state.get("pending_sell_ord_id")
         if old_sell_id:
-            self.log.error(f"BUG: 检测到多个 SELL，old_id={old_sell_id}，立即退出")
-            sys.exit(1)
+            self.log.warning(f"已有 SELL {old_sell_id}，先撤再挂以保证唯一")
+            self._safe_cancel(old_sell_id)
+            self.state["pending_sell_ord_id"] = None
+            self.state["pending_sell_px"] = None
 
         # 风控闸门：加 SELL 被拒 → 跳过不挂（不动现有挂单，下次成交/对账重试）
         if not self._can_open_sell(px):
