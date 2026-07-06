@@ -240,6 +240,25 @@ class Strategy:
             self.log.error(f"账户检查异常: {e}")
             return False
 
+    def _resolve_auto_adopt_px(self):
+        """--adopt 裸写：取该 symbol 账户最后一笔成交价作基准；查不到用当前市价兜底，
+        都取不到则停策略。结果写回 self.cfg.adopt_sell_px，供后续基准价起仓逻辑复用。"""
+        base = 0.0
+        try:
+            base = self.client.get_last_fill_price(self.cfg.symbol)
+        except Exception as e:
+            self.log.warning(f"--adopt 查最后成交价异常: {e}")
+        src = "账户最后成交价"
+        if base <= 0:
+            base = self.client.get_price(self.cfg.symbol)
+            src = "当前市价(无成交回退)"
+        if base <= 0:
+            self.log.error("--adopt 自动基准价获取失败（无成交且无市价），策略停止")
+            sys.exit(1)
+        self.cfg.adopt_sell_px = base
+        self.log.info(f"--adopt 自动基准价 = {base}（来源: {src}）")
+        self._notify(f"--adopt 自动基准价 {base:.6f}（{src}）")
+
     def _cancel_stale_pending_on_startup(self):
         """阶段 3: 清理启动前的挂单"""
         try:
@@ -260,6 +279,10 @@ class Strategy:
         if not self._check_account_config():
             sys.exit(1)
         self._cancel_stale_pending_on_startup()
+
+        # --adopt 裸写(adopt_auto)：自动解析基准价并写回 adopt_sell_px，复用后续起仓逻辑
+        if self.cfg.adopt_auto and self.cfg.adopt_sell_px <= 0:
+            self._resolve_auto_adopt_px()
 
         # 接管或起仓
         if not self._adopt_position():

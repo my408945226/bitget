@@ -256,6 +256,27 @@ class BitgetClient:
         resp = self._get("/api/v3/trade/unfilled-orders", {"category": "USDT-FUTURES", "symbol": inst_id}, private=True)
         return (resp.get("data") or {}).get("list") or [] if resp.get("code") == "00000" else []
 
+    def get_last_fill_price(self, symbol: str) -> float:
+        """GET /api/v3/trade/fills - 账户成交明细，返回最近一笔成交价（查不到返回 0）。
+
+        用于 `--adopt` 裸写时自动取基准价。按成交时间取最新一条的 price。
+        """
+        resp = self._get("/api/v3/trade/fills",
+                         {"category": "USDT-FUTURES", "symbol": symbol}, private=True)
+        if resp.get("code") != "00000":
+            return 0.0
+        lst = (resp.get("data") or {}).get("list") or []
+        if not lst:
+            return 0.0
+        try:
+            # 按成交时间取最新一条（兼容 fillTime/cTime/ts 命名）
+            latest = max(lst, key=lambda x: int(
+                x.get("fillTime") or x.get("cTime") or x.get("ts") or 0))
+            return float(latest.get("price") or latest.get("fillPrice")
+                         or latest.get("priceAvg") or 0)
+        except (ValueError, TypeError):
+            return 0.0
+
     def get_order_info(self, inst_id: str, ord_id: str) -> dict:
         """查订单"""
         resp = self._get("/api/v3/trade/order-info", {"category": "USDT-FUTURES", "symbol": inst_id, "orderId": ord_id}, private=True)

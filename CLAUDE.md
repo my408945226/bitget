@@ -96,6 +96,7 @@ python3 monitor.py
 | （默认无参数） | 市价 SELL 1 单，stack_top=市价，opens=1 |
 | `--limit <px>` | 限价 SELL 1 单，stack_top=px，opens=0 等成交（旧名 `--initial-sell-px`） |
 | `--adopt <px>` | 基准价：stack_top=px，挂 SELL @ px×(1+grid)，opens=0（旧名 `--adopt-sell-px`） |
+| `--adopt`（裸写） | 自动基准价：取该 symbol 账户最后一笔成交价（`get_last_fill_price`，无则当前市价兜底）写回 `adopt_sell_px`，复用上面基准价逻辑。argparse `nargs='?' const='AUTO'`，`Config.adopt_auto` 标志，`init` 里 `_resolve_auto_adopt_px` 解析 |
 
 启动时优先 `_adopt_position`：若交易所已有 short 持仓则接管（opens=`total/POSITION_SZ`），否则才起仓。
 
