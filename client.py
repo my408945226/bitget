@@ -255,7 +255,40 @@ class BitgetClient:
         if reduce_only:
             body["reduceOnly"] = "yes"
 
-        return self._post("/api/v3/trade/place-order", body)
+        resp = self._post("/api/v3/trade/place-order", body)
+        # ★ Bitget reduceOnly（BUY 平仓）单下单成功却返回 data.orderId=None，只给 clientOid。
+        # 用 clientOid 反查 order-info 回填真 orderId，否则上层拿不到 id、无法追踪该单：
+        # 成交推送被 on_fill 当「非追踪订单」丢弃、平仓只能靠对账兜底 → 账目滞后疯狂重挂
+        # （BGBUSDT/MIRAUSDT/REDUSDT 一系列事故的第一性根因，2026-07-10 诊断确认）。
+        if resp.get("code") == "00000":
+            data = resp.get("data")
+            if isinstance(data, dict) and not data.get("orderId"):
+                oid = self._resolve_ord_id_by_client_oid(
+                    inst_id, data.get("clientOid") or cl_ord_id)
+                if oid:
+                    data["orderId"] = oid
+        return resp
+
+    def _resolve_ord_id_by_client_oid(self, inst_id: str, client_oid: str,
+                                      retries: int = 4, delay: float = 0.2) -> str:
+        """下单响应缺 orderId 时用 clientOid 反查真实 orderId（Bitget reduceOnly 单常见）。
+        刚下单可能短暂未落库 → 重试几次；全部失败返回空串（上层据此告警）。"""
+        if not client_oid:
+            return ""
+        for _ in range(retries):
+            resp = self._get("/api/v3/trade/order-info",
+                             {"category": "USDT-FUTURES", "symbol": inst_id,
+                              "clientOid": client_oid}, private=True)
+            if resp.get("code") == "00000":
+                data = resp.get("data") or {}
+                if isinstance(data, list):
+                    data = data[0] if data else {}
+                oid = data.get("orderId") if isinstance(data, dict) else None
+                if oid:
+                    return oid
+            time.sleep(delay)
+        self.log.warning(f"clientOid {client_oid} 反查 orderId 失败（{retries} 次）")
+        return ""
 
     def cancel_order(self, inst_id: str, ord_id: str) -> dict:
         """撤单"""

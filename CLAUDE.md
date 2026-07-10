@@ -40,6 +40,7 @@ python3 monitor.py
 | 成功码 | `code == "00000"` |
 | 账户接口 | UTA 禁用 v2 经典接口（`40085`），必须用 `/api/v3/account/assets` |
 | reduceOnly | 字符串 `"yes"`（非布尔） |
+| **下单响应 orderId** | ⚠️ reduceOnly（BUY 平仓）单 place-order 成功（code 00000）却常返回 `data.orderId=**None**`，只给 `clientOid` → 必须用 clientOid 反查 order-info 回填真 orderId（`client._resolve_ord_id_by_client_oid`），否则整个下游追踪全断 |
 
 `client.py` 把 v3 字段归一化为 OKX/v2 兼容名（`holdSide`/`openPriceAvg`/`unrealizedPL`/`total`/`minTradeNum` 等），
 策略层沿用 OKX 命名。改 `client.py` 时注意保持这层映射。
@@ -156,6 +157,7 @@ REST 每 60s 全量扫描（无 WS）：
 | 0 持仓凭空挂 SELL 重新开空 | `_ensure_orders_complete` 无视 n_pos 补 SELL | n_pos==0 直接 return 不补单（已） |
 | **`--limit` 起仓后初始 SELL 被秒撤、策略空挂不触发**（TNSRUSDT 2026-06-21） | `_open` 限价模式把 SELL 挂在 `stack_top` 本身、`opens=0`，随后 `init` 调 `_refresh_orders` 按 `stack_top×(1+grid)` 重算，价格不符→撤掉初始 SELL，又因 `n_pos==0` 不补 | `_refresh_orders` 加等待态守卫：`n_pos==0 且有 pending_sell` 时原样不动，等成交后再走网格（已）。注：`--adopt` 因 SELL 挂在 `基准×(1+grid)` 与 refresh 期望一致，本无此问题 |
 | **一轮"完成"后留下无网格裸空单**（TNSRUSDT 2026-06-21） | ①对账与 WS `on_fill` 并发改 closes（`_reconcile` 没持锁）多算 1 ②`last_reconcile_ts` 被成交与调度复用，race guard 失效 ③`_cycle_complete` 只看 `opens==closes` 不核实盘→提前退出留裸仓 | ①`_do_reconcile` 全程持 `RLock` 与 on_fill 串行 ②拆出 `last_fill_ts` 专记成交 ③`_cycle_complete` 退出前查实盘，≠0 则按实盘修正重挂网格自愈（均已） |
+| **【第一性根因】reduceOnly BUY 平仓全走对账、pending_buys 记不上、疯狂重挂、stack_top 冻结**（BGBUSDT 2026-07-10 诊断确认） | Bitget place-order 对 reduceOnly BUY 单下单成功（code 00000）却返回 `data.orderId=None`（只给 clientOid），`_place_buy` 提取不到 orderId → pending_buys 记不上 → BUY 成交 WS 推送被 on_fill 当「非追踪订单」丢弃 → 平仓只能靠对账 diff（历史上还不下移 stack_top）→ 账目滞后 + 网格冻结 + 超量重挂。**之前多轮修复（stack_top 下移/对账四防线/多SELL不自杀）都是在治这个根因的下游症状** | client.place_order 下单成功但 orderId 空时，用 clientOid 反查 order-info 回填真 orderId（`_resolve_ord_id_by_client_oid`，带 4 次重试）→ pending_buys 正常记录、WS 平仓推送能匹配，下游全部自愈（已） |
 | **WS 长断→本地账目滞后→按虚高 n_pos 疯狂重挂 reduceOnly 单打限频（1 小时暴走）**（MIRAUSDT 2026-07-05） | WS 僵尸断连 2h（实盘已平近 0，本地仍记 6~7 单）+ REST 兜底失效（get_open_orders 40008 时间戳过期、order-info 429），对账缺 OKX 四道防线：①`_check_missed_fills` 只认 filled、canceled 不清引用→pending_buys 堆僵尸 ②无「持仓≈0 收尾」闸门→继续按本地补挂 ③reduceOnly 超量拒单只 warning 不弹栈 ④退避只挂 WS 回调、僵尸期收不到 canceled→退避永不触发 | 照 OKX 补齐：①canceled→清本地引用（429/查不到返回空 dict 时不动防误删）②`_do_reconcile` 加 `exch_sz<eps 且 local>0 → _cycle_complete()`（对齐 `_detect_and_handle_manual_close`，防暴走核心）③`_place_buy` 命中 `_is_position_insufficient` → 弹栈 closes+1（对齐 `_pop_stack_entry`）④对账 canceled 路径也走 `_note_buy_cancel` 退避（均已，见 memory `bitget-ws-longbreak-runaway`） |
 | **加仓/补挂后误报「多个 SELL」立即 exit(1)、留裸仓**（VELODROMEUSDT 2026-07-04） | `_place_sell` 的「检测到已有 SELL → `sys.exit(1)`」是**过度防御设计**：它假设进来时 `pending_sell_ord_id` 必为 None，但 `_ensure_orders_complete`(对账补挂)等路径不清 id 就调它，竞态重入即误判双 SELL 杀进程 → 无网格裸空单 | 去掉 `sys.exit(1)` 自杀，改为**先撤旧 SELL→清引用→挂新**（对齐 OKX `_refresh_sell_only_locked`，OKX 从不因多 SELL 退出）（已） |
 | **平仓成交后误报「多个 SELL」立即 exit(1)**（BGBUSDT 2026-07-02） | BUY 平仓令 stack_top 下移→SELL 目标价变→`_refresh_orders` 撤旧 SELL 后**没清 `pending_sell_ord_id`** 就调 `_place_sell`，后者读到旧 id 判双 SELL 而退出（stack_top 下移修复后才暴露此潜伏 bug） | 撤 SELL 成功后立即 `pending_sell_ord_id/px=None` 再挂新单，对齐 OKX `_refresh_sell_only_locked`（已） |
