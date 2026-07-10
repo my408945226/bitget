@@ -59,7 +59,7 @@ python3 monitor.py
 | 1 | 保证金率 ≥ 500% | `mmr>0 且 accountEquity/mmr < 5.0` → 拒 |
 | 2 | 加仓后总名义 ≤ 上限 | `(现有持仓张数 + 本单) × px > max_notional_usdt`（默认 10000）→ 拒 |
 
-- 快照走 **REST**（`get_account` + `get_position`），不读 WS 缓存
+- 快照走 **REST**（`get_account` + `get_position`），不读 WS 缓存；`get_account(use_cache=True)` 带 3s TTL 缓存（保证金率秒级不剧变，减轻多币共用账户对 `/account/assets` 的限频压力；只缓存成功结果，失败/对账/监控仍实时）
 - 查询异常 → **放行**（fail-open，避免临时网络抖动卡住网格）
 - 起仓被拒 → `sys.exit(1)` 停策略；加 SELL 被拒 → WARN+TG 跳过不挂，下次成交/对账重试
 
@@ -77,6 +77,7 @@ python3 monitor.py
   - **时间戳分离**：`last_fill_ts`（成交，防 race 用）vs `last_reconcile_ts`（主循环 60s 调度用），不可复用——复用会让成交把对账调度顶掉、race guard 也失效
 - **`on_fill` / `_do_reconcile` 共用 `RLock` 串行化**，防 WS + 对账并发重复挂单/重复计数
 - **`_cycle_complete` 退出前核对实盘持仓**：`opens==closes` 只是本地账目，若竞态多算 closes 会在实盘仍有仓时误判完成→直接退出留**裸空单**。故实盘 ≠ 0 时不退出，按实盘 `opens=n_pos/closes=0` 修正 + 重建 stack_top + 撤旧挂单重挂网格自愈
+- **退出前扫尾 `_sweep_residual_position`**：正常退出分支撤光挂单后，再查一次真实持仓，有裸头（partial fill 漏账 / 撤单空窗刚成交）用 **reduceOnly 市价单**平掉（只减不增，已平不反手）；**灰尘**（数量取整为 0 / 名义 < `minTradeUSDT`）平不掉必被拒 → 告警留人工，不硬下；失败也告警不吞异常
 
 ## 网格运行逻辑（`_refresh_orders`）
 

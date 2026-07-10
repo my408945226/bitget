@@ -49,6 +49,7 @@ class BitgetClient:
         self.passphrase = passphrase
         self.log = logger
         self.session = requests.Session()
+        self._account_cache = None   # (ts, result) — get_account 的 TTL 缓存
 
     def _timestamp(self) -> str:
         return str(int(time.time() * 1000))
@@ -141,12 +142,23 @@ class BitgetClient:
 
     # ====== 私密接口：账户 ======
 
-    def get_account(self, margin_coin: str = "USDT") -> dict:
+    def get_account(self, margin_coin: str = "USDT",
+                    use_cache: bool = False, ttl: float = 3.0) -> dict:
         """GET /api/v3/account/assets - 统一账户(UTA)资产
 
         UTA 统一账户禁用 v2 经典接口（40085），故用 v3。账户级权益按数值择优
         （accountEquity → usdtEquity → effEquity），避免某一字段为 0 时误判。
+
+        :param use_cache: True 时命中 ttl 秒内的账户快照缓存直接返回（保证金率秒级
+            不剧变，下单/对账高频查账走缓存可减轻多币共用账户对 /account/assets 的
+            压力、避免限频）。默认 False（对账/监控要实时）。查询失败不写缓存、返回
+            空 dict 让上层保守处理。
         """
+        if use_cache and self._account_cache:
+            ts, cached = self._account_cache
+            if time.time() - ts < ttl:
+                return cached
+
         path = "/api/v3/account/assets"
         resp = self._get(path, {}, private=True)
         if resp.get("code") != "00000":
@@ -177,7 +189,7 @@ class BitgetClient:
                 f"usdtEquity={data.get('usdtEquity')} effEquity={data.get('effEquity')} "
                 f"mmr={data.get('mmr')} mgnRatio={data.get('mgnRatio')}")
 
-        return {
+        result = {
             "code": "00000",
             "data": [{
                 "available": available,
@@ -187,6 +199,8 @@ class BitgetClient:
                 "mgnRatio": data.get("mgnRatio", "0"),
             }]
         }
+        self._account_cache = (time.time(), result)   # 仅缓存成功结果
+        return result
 
     def get_position(self, symbol: str) -> dict:
         """GET /api/v3/position/current-position - 获取持仓"""
@@ -331,7 +345,9 @@ class BitgetClient:
         if data.get("code") != "00000":
             self.log.warning(f"POST {path} 返回异常: code={data.get('code')} msg={data.get('msg')}")
         else:
-            self.log.info(f"POST {path} 成功")
+            # 逐请求成功日志降到 DEBUG：长跑 + 多币时 INFO 会刷屏吃磁盘、淹没策略日志。
+            # 保留 WARNING/ERROR（上面的异常分支）。
+            self.log.debug(f"POST {path} 成功")
         return data
 
     # ====== WebSocket 方法 ======

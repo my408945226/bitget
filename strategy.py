@@ -842,6 +842,10 @@ class Strategy:
         for oid in list(self.state.get("pending_buys", {}).keys()):
             self._safe_cancel(oid)
 
+        # ★ 退出前扫尾：撤光挂单后再查一次真实持仓，若有裸头（partial fill 漏账 /
+        # 撤单空窗刚成交等）用 reduceOnly 市价平掉，灰尘平不掉则告警留人工。
+        self._sweep_residual_position()
+
         # 清空本地状态
         self.state["stack_top"] = 0
         self.state["opens"] = 0
@@ -947,8 +951,10 @@ class Strategy:
         无持仓/查询异常 → 放行。
         """
         try:
-            # 账户级权益与维持保证金（联合保证金账户级，比持仓级更可靠）
-            a = self.client.get_account().get("data", [{}])[0]
+            # 账户级权益与维持保证金（联合保证金账户级，比持仓级更可靠）。
+            # 用 TTL 缓存：一次 refresh/连续成交会多次调风控，保证金率秒级不剧变，
+            # 走 3s 缓存减轻多币共用账户对 /account/assets 的压力、避免限频。
+            a = self.client.get_account(use_cache=True).get("data", [{}])[0]
             equity = float(a.get("accountEquity") or 0)
             mmr = float(a.get("mmr") or 0)
 
@@ -1109,6 +1115,61 @@ class Strategy:
         except:
             place = 4
         return float(_quantize_price(_to_decimal(px), place))
+
+    def _round_qty(self, qty: float) -> float:
+        """按合约数量精度向下取整（volumePlace，通常 0=整数张）"""
+        try:
+            place = int(self.contract_info.get("volumePlace", 0))
+        except:
+            place = 0
+        return float(_quantize_price(_to_decimal(qty), place))
+
+    def _sweep_residual_position(self):
+        """终态扫尾：撤光挂单后查真实持仓，有裸头用 reduceOnly 市价平掉。
+
+        做空持仓的平仓方向是 buy；reduceOnly 保证只减不增（持仓已平也不会反手开多）。
+        灰尘（格式化后为 0 / 名义价值 < 最小下单额）平不掉必被拒 → 告警留人工，不硬下。
+        失败也告警，不吞异常。仅用于 _cycle_complete 退出路径的兜底。
+        """
+        try:
+            exch_sz = self._get_exchange_size()
+        except Exception as e:
+            self.log.warning(f"扫尾查持仓异常: {e}")
+            return
+        if exch_sz <= 1e-9:
+            return
+
+        qty = self._round_qty(exch_sz)
+        px = self.client.get_price(self.cfg.symbol) or 0
+        min_usdt = 0.0
+        try:
+            min_usdt = float(self.contract_info.get("minTradeUSDT", 5) or 5)
+        except (TypeError, ValueError):
+            min_usdt = 5.0
+
+        # 灰尘：数量取整为 0，或名义价值低于最小下单额 → 平不掉，告警留人工
+        if qty <= 0 or (px > 0 and qty * px < min_usdt):
+            self.log.error(f"扫尾发现裸头 {exch_sz} 但为灰尘（名义<{min_usdt} USDT），无法市价平")
+            self._notify(f"⚠️ 退出前残留裸头 {exch_sz}（灰尘平不掉），请人工核查",
+                         level="CRITICAL")
+            return
+
+        try:
+            resp = self.client.place_order(self.cfg.symbol, "buy", qty, 0,
+                                           order_type="market", reduce_only=True)
+        except Exception as e:
+            self.log.error(f"扫尾平仓异常: {e}")
+            self._notify(f"⚠️ 退出前残留裸头 {exch_sz} 平仓异常: {e}，请人工处理",
+                         level="CRITICAL")
+            return
+
+        if resp.get("code") == "00000":
+            self.log.warning(f"扫尾：reduceOnly 市价平掉残留裸头 {qty}")
+            self._notify(f"退出前扫尾：已 reduceOnly 市价平掉残留裸头 {qty}", level="WARN")
+        else:
+            self.log.error(f"扫尾平仓被拒: code={resp.get('code')} msg={resp.get('msg')}")
+            self._notify(f"⚠️ 退出前残留裸头 {exch_sz} 平仓失败: {resp.get('msg')}，请人工处理",
+                         level="CRITICAL")
 
 
 if __name__ == "__main__":
