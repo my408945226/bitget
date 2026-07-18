@@ -292,7 +292,7 @@ class Strategy:
             elif self.cfg.initial_sell_px > 0:
                 open_mode = "限价"
             else:
-                open_mode = "市价"
+                open_mode = "post-only追价"
         else:
             open_mode = "接管"
 
@@ -349,6 +349,13 @@ class Strategy:
             self.state["stack_top"] = fill_px
             self.state["opens"] = 1
             self._save()
+            self._notify(
+                f"🔻 起仓成交 (post-only maker)\n"
+                f"成交价: {fill_px:.6f}\n"
+                f"名义: {self.POSITION_SZ * fill_px:.2f} USDT\n"
+                f"持仓: 1 单",
+                level="TRADE",
+            )
             return
 
         # 限价/基准模式：挂初始 SELL 前过风控
@@ -367,6 +374,13 @@ class Strategy:
         self.state["pending_sell_ord_id"] = resp.get("data", {}).get("orderId")
         self.state["pending_sell_px"] = sell_px
         self._save()
+        self._notify(
+            f"📤 起仓挂单 (limit)\n"
+            f"SELL @ {sell_px:.6f}\n"
+            f"名义: {self.POSITION_SZ * sell_px:.2f} USDT\n"
+            f"等待成交",
+            level="INFO",
+        )
 
     def _open_maker_chase(self, side: str, total_qty: float = None,
                           poll: float = 1.0, wait: float = 8.0,
@@ -793,6 +807,7 @@ class Strategy:
         self._notify(
             f"🔻 已加仓第 {n} 单\n"
             f"成交价: {px:.6f}\n"
+            f"名义: {self.POSITION_SZ * px:.2f} USDT\n"
             f"stack_top: {px:.6f}",
             level="TRADE",
         )
