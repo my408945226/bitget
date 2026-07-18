@@ -97,6 +97,21 @@ class BitgetClient:
                 return 0.0
         return 0.0
 
+    def get_book_ticker(self, symbol: str) -> dict:
+        """GET /api/v3/market/tickers - 返回买一/卖一盘口(BBO)：{bidPrice, askPrice}。
+        tickers 直接带 bid1Price/ask1Price，无需单独 orderbook 接口。用于 post-only
+        盘口追价起仓。查不到返回空 dict。"""
+        resp = self._get("/api/v3/market/tickers",
+                         {"category": "USDT-FUTURES", "symbol": symbol})
+        if resp.get("code") != "00000":
+            return {}
+        data = resp.get("data") or []
+        if isinstance(data, list):
+            data = data[0] if data else {}
+        if not isinstance(data, dict):
+            return {}
+        return {"bidPrice": data.get("bid1Price"), "askPrice": data.get("ask1Price")}
+
     def get_funding_rate(self, symbol: str) -> float:
         """GET /api/v3/market/tickers - 获取当前资金费率（8h 周期）"""
         path = "/api/v3/market/tickers"
@@ -236,8 +251,12 @@ class BitgetClient:
 
     def place_order(self, inst_id: str, side: str, sz: float, px: float,
                     order_type: str = "market", reduce_only: bool = False,
-                    cl_ord_id: str = None) -> dict:
-        """下单"""
+                    cl_ord_id: str = None, post_only: bool = False) -> dict:
+        """下单
+
+        :param post_only: True → force=post_only（只做 maker，会立即 taker 成交时
+            交易所直接拒单 code≠00000）。用于盘口追价起仓。
+        """
         if not cl_ord_id:
             cl_ord_id = _gen_cl_ord_id("sp")
 
@@ -252,6 +271,8 @@ class BitgetClient:
         }
         if order_type == "limit":
             body["price"] = str(px)
+        if post_only:
+            body["force"] = "post_only"
         if reduce_only:
             body["reduceOnly"] = "yes"
 

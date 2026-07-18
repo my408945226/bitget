@@ -95,7 +95,7 @@ python3 monitor.py
 
 | CLI 参数 | 动作 |
 |---|---|
-| （默认无参数） | 市价 SELL 1 单，stack_top=市价，opens=1 |
+| （默认无参数） | **post-only 盘口追价** SELL 1 单（`_open_maker_chase`，挂卖一 `ask1Price` 做 maker，未成交撤单按最新盘口追价直到成交），stack_top=成交均价，opens=1。移植 aster；省吃单点差/拿返佣。Bitget post_only 会 taker 时下单直接被拒(code≠00000)→追价（非币安 EXPIRED 语义） |
 | `--limit <px>` | 限价 SELL 1 单，stack_top=px，opens=0 等成交（旧名 `--initial-sell-px`） |
 | `--adopt <px>` | 基准价：stack_top=px，挂 SELL @ px×(1+grid)，opens=0（旧名 `--adopt-sell-px`） |
 | `--adopt`（裸写） | 自动基准价：取该 symbol 账户最后一笔成交价（`get_last_fill_price`，无则当前市价兜底）写回 `adopt_sell_px`，复用上面基准价逻辑。argparse `nargs='?' const='AUTO'`，`Config.adopt_auto` 标志，`init` 里 `_resolve_auto_adopt_px` 解析 |

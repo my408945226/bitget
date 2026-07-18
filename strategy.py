@@ -332,7 +332,7 @@ class Strategy:
             sell_px = self.cfg.initial_sell_px
             self.state["stack_top"] = sell_px
         else:
-            # 市价起仓：先取价过风控，再下单
+            # 默认起仓：post-only 盘口追价（maker，省吃单点差/拿返佣），对齐 aster 版
             px = self.client.get_price(self.cfg.symbol)
             if px <= 0:
                 self.log.error("无法获取市价")
@@ -341,12 +341,12 @@ class Strategy:
                 self.log.error("起仓被风控拒，策略停止")
                 sys.exit(1)
 
-            resp = self.client.place_order(self.cfg.symbol, "sell", self.POSITION_SZ, 0.0, order_type="market")
-            if resp.get("code") != "00000":
-                self.log.error(f"起仓失败: {resp.get('msg')}")
+            fill_px = self._open_maker_chase("sell")
+            if fill_px <= 0:
+                self.log.error("post-only 起仓追价未成交，策略停止")
                 sys.exit(1)
 
-            self.state["stack_top"] = px
+            self.state["stack_top"] = fill_px
             self.state["opens"] = 1
             self._save()
             return
@@ -367,6 +367,80 @@ class Strategy:
         self.state["pending_sell_ord_id"] = resp.get("data", {}).get("orderId")
         self.state["pending_sell_px"] = sell_px
         self._save()
+
+    def _open_maker_chase(self, side: str, total_qty: float = None,
+                          poll: float = 1.0, wait: float = 8.0,
+                          max_rounds: int = 60) -> float:
+        """post-only 盘口追价起仓（移植 aster `_open_maker_chase`，适配 Bitget）：
+        挂 maker 盘口价，未成交撤单按最新盘口追价，直到全部成交，返回加权均价（失败 0）。
+
+        - side="sell" 挂卖一(ask1Price) / "buy" 挂买一(bid1Price) → 必为 maker。
+        - Bitget post_only 若会立即 taker 成交 → 下单直接被拒(code≠00000)，非 aster 的
+          EXPIRED 状态；这里按「下单被拒即 sleep 后追价重挂」处理。
+        - 每单最多等 wait 秒，未成交撤掉按最新盘口重挂；累计部分成交只补剩余量。
+        - max_rounds 防盘口异常无限追价（约 max_rounds×(wait+poll) 秒上限）。
+        """
+        total = total_qty if total_qty is not None else self.POSITION_SZ
+        filled_qty = 0.0
+        filled_cost = 0.0
+        rounds = 0
+        while filled_qty < total - 1e-9 and rounds < max_rounds:
+            rounds += 1
+            remain = self._round_qty(total - filled_qty)
+            if remain <= 0:
+                break
+            try:
+                bt = self.client.get_book_ticker(self.cfg.symbol)
+                bid = float(bt.get("bidPrice") or 0)
+                ask = float(bt.get("askPrice") or 0)
+            except Exception as e:
+                self.log.warning(f"[起仓] 取盘口失败重试: {e}")
+                time.sleep(poll)
+                continue
+            if bid <= 0 or ask <= 0:
+                time.sleep(poll)
+                continue
+
+            px = self._round_px(ask if side == "sell" else bid)
+            resp = self.client.place_order(self.cfg.symbol, side, remain, px,
+                                           order_type="limit", post_only=True,
+                                           cl_ord_id=_gen_cl_ord_id("OPEN"))
+            if resp.get("code") != "00000":
+                # post_only 会 taker 被拒（或临时失败）→ 追价重挂
+                self.log.info(f"[起仓] post-only 挂单被拒，追价重挂: {resp.get('msg')}")
+                time.sleep(poll)
+                continue
+
+            oid = resp.get("data", {}).get("orderId")
+            if not oid:
+                self.log.warning("[起仓] post-only 挂单无 orderId，追价重挂")
+                time.sleep(poll)
+                continue
+
+            # 轮询该单成交（含挂出即 filled）
+            waited = 0.0
+            st = "live"
+            while waited < wait:
+                time.sleep(poll)
+                waited += poll
+                info = self.client.get_order_info(self.cfg.symbol, oid)
+                st = info.get("orderStatus") or info.get("status") or "live"
+                if st in ("filled", "canceled", "cancelled"):
+                    break
+
+            # 超时仍挂着 → 撤单追价（撤后再查最终成交量）
+            if st not in ("filled", "canceled", "cancelled"):
+                self._safe_cancel(oid)
+            info = self.client.get_order_info(self.cfg.symbol, oid)
+            exec_qty = float(info.get("cumExecQty") or info.get("accBaseVolume") or 0)
+            avg = float(info.get("avgPrice") or info.get("priceAvg") or 0)
+            if exec_qty > 0 and avg > 0:
+                filled_qty += exec_qty
+                filled_cost += exec_qty * avg
+                self.log.info(f"[起仓] maker 成交 {exec_qty} @ {avg:.6f} "
+                              f"(累计 {filled_qty}/{total})")
+
+        return filled_cost / filled_qty if filled_qty > 0 else 0.0
 
     def run(self):
         """主循环"""
