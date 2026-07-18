@@ -284,25 +284,32 @@ class Strategy:
         if self.cfg.adopt_auto and self.cfg.adopt_sell_px <= 0:
             self._resolve_auto_adopt_px()
 
-        # 接管或起仓
-        if not self._adopt_position():
-            self._open()
-            if self.cfg.adopt_sell_px > 0:
-                open_mode = "基准"
-            elif self.cfg.initial_sell_px > 0:
-                open_mode = "限价"
-            else:
-                open_mode = "post-only追价"
+        # 起仓方式（由 CLI 参数决定；实际接管情况在下方另发通知）
+        if self.cfg.adopt_sell_px > 0:
+            open_mode = "基准价"
+        elif self.cfg.initial_sell_px > 0:
+            open_mode = "限价"
         else:
-            open_mode = "接管"
+            open_mode = "post-only追价"
 
-        # 挂网格
-        self._refresh_orders()
-
+        # ① 启动即通知（必须先于起仓成交通知）
         self._notify(
             f"策略启动 | 数量 {self.POSITION_SZ} | "
-            f"网格 {self.GRID_PCT*100:.1f}% | 开仓 {open_mode}"
+            f"网格 {self.GRID_PCT*100:.1f}% | 计划开仓 {open_mode}"
         )
+
+        # ② 接管已有持仓，或起仓（起仓成交通知在 _open 内部发）
+        if self._adopt_position():
+            n = max(0, self.state.get("opens", 0) - self.state.get("closes", 0))
+            self._notify(
+                f"接管已有持仓 {n} 单 | stack_top {self.state.get('stack_top', 0):.6f}",
+                level="TRADE",
+            )
+        else:
+            self._open()
+
+        # ③ 挂网格
+        self._refresh_orders()
         self._save()
 
     def _adopt_position(self) -> bool:
