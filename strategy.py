@@ -900,35 +900,22 @@ class Strategy:
         self._refresh_orders()
 
     def _cycle_complete(self):
-        """一轮交易完成 - 清理所有挂单后退出。
+        """一轮交易完成 - 清理所有挂单 + 扫尾平掉实盘残留后退出。
 
-        退出前**必须**核对交易所实际持仓：opens==closes 只是本地账目，若对账/WS
-        竞态多算了 closes，会在实盘仍有持仓时误判完成。直接退出将留下无网格的裸空单
-        （TNSRUSDT 2026-06-21 事故）。故实盘 ≠ 0 时不退出，按实盘修正并重挂网格自愈。
+        对齐 OKX `_handle_close_filled`/`_detect_and_handle_manual_close` 的收尾：
+        一轮结束（opens==closes）即撤所有挂单，再用 `_sweep_residual_position`
+        以 reduceOnly 市价把交易所仍残留的裸头（含竞态多算 closes 时残留的 ~1 单、
+        partial 漏账等）**平掉**，然后退出。
+
+        旧设计发现实盘 ≠ 0 时会「重建网格继续维护」并反复弹「平仓不彻底：实盘仍有
+        ~1 单」告警——但真正的收尾语义应当是 OKX 那样把残留清掉后收工，而不是无限
+        续跑网格（ACEUSDT 2026-07-19 反复告警）。故此处不再重建网格，一律 sweep→exit。
+        灰尘（对齐后 < 最小下单额）才平不掉，由 `_sweep_residual_position` 告警留人工。
         """
-        exch_sz = self._get_exchange_size()
-        if exch_sz > 1e-9:
-            n_pos = max(1, round(exch_sz / self.POSITION_SZ))
-            frac = exch_sz % self.POSITION_SZ
-            self.log.error(f"一轮完成前发现实盘仍有 {exch_sz} 张持仓，取消退出，按实盘修正重挂网格")
-            if frac > 1e-9:
-                self._notify(f"⚠️ 平仓不彻底且有零头 {frac:.4f}，请手动核查", level="CRITICAL")
-            self._notify(f"⚠️ 平仓不彻底：实盘仍有 ~{n_pos} 单，已按实盘修正继续维护网格（防裸仓）", level="CRITICAL")
-            # 以交易所为准重置账目并重建 stack_top（同接管逻辑），撤旧挂单后重挂
-            self.state["opens"] = n_pos
-            self.state["closes"] = 0
-            self.state["pending_sell_ord_id"] = None
-            self.state["pending_sell_px"] = None
-            self.state["pending_buys"] = {}
-            det = self._get_position_detail()
-            if det.get("avg_price", 0) > 0:
-                self.state["stack_top"] = det["avg_price"]
-            self._save()
-            self._cancel_stale_pending_on_startup()
-            self._refresh_orders()
-            return
+        prev_opens = self.state.get("opens", 0)
+        prev_closes = self.state.get("closes", 0)
+        prev_pnl = self.state.get("total_realized_pnl", 0.0)
 
-        # 实盘确认为 0 → 正常清理退出
         # 撤销 SELL
         sell_id = self.state.get("pending_sell_ord_id")
         if sell_id:
@@ -938,8 +925,9 @@ class Strategy:
         for oid in list(self.state.get("pending_buys", {}).keys()):
             self._safe_cancel(oid)
 
-        # ★ 退出前扫尾：撤光挂单后再查一次真实持仓，若有裸头（partial fill 漏账 /
-        # 撤单空窗刚成交等）用 reduceOnly 市价平掉，灰尘平不掉则告警留人工。
+        # ★ 退出前扫尾：撤光挂单后再查一次真实持仓，若有裸头（竞态多算 closes 残留
+        # 的 ~1 单 / partial fill 漏账 / 撤单空窗刚成交等）用 reduceOnly 市价平掉，
+        # 灰尘平不掉则告警留人工。对齐 OKX `_sweep_residual_position`。
         self._sweep_residual_position()
 
         # 清空本地状态
@@ -951,7 +939,14 @@ class Strategy:
         self.state["pending_buys"] = {}
         self._save()
 
-        self._notify("一轮做空完成，所有挂单已清理", level="TRADE")
+        self._notify(
+            f"✅ <b>一轮做空完成，持仓清空</b>\n"
+            f"合约: <code>{self.cfg.symbol}</code>\n"
+            f"加仓 {prev_opens} 次 / 平仓 {prev_closes} 次\n"
+            f"累计已实现盈亏: <code>{prev_pnl:+.4f}</code> USDT\n"
+            f"<i>所有挂单已撤 + 实盘残留已扫尾</i>",
+            level="TRADE",
+        )
         sys.exit(0)
 
     def _refresh_orders(self):
