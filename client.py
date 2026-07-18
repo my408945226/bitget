@@ -272,7 +272,9 @@ class BitgetClient:
         if order_type == "limit":
             body["price"] = str(px)
         if post_only:
-            body["force"] = "post_only"
+            # ★ UTA v3 的 post-only 字段是 timeInForce=post_only（实测确认）。
+            # 用 force/timeInForceValue 会被静默忽略→退化成 gtc（会 taker），务必用这个。
+            body["timeInForce"] = "post_only"
         if reduce_only:
             body["reduceOnly"] = "yes"
 
