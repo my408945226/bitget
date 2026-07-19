@@ -70,7 +70,7 @@ python3 monitor.py
   - **带自动重连 + 僵尸检测**（`client.py`）：按官方规则「收不到 pong 即重连」，每 20s 发 `ping`，任何消息/pong 刷新存活时间戳，超 50s 无消息 → 判半开/僵尸连接主动关闭重连；关库自带协议 ping（`ping_interval=None`）避免与应用层心跳互斥；重连退避 1→30s
   - **重连后回调 `on_reconnect`** → 置 `last_reconcile_ts=0` 强制立即对账，补断连空窗期漏掉的成交
   - `should_stop` 优雅退出重连循环；库未装/彻底失败才降级为纯对账兜底
-- **60s 定时对账 `_reconcile`**（`RECONCILE_SEC`）：①补 WS 漏推（`_check_missed_fills` 用 REST 查 filled 补发虚拟 on_fill）②查交易所实际持仓与本地 opens-closes 对比，差 ≥1 张自动修复（交易所为准）③零头（`okx_sz % POSITION_SZ`）→ WARN 要求人工平仓
+- **30s 定时对账 `_reconcile`**（`RECONCILE_SEC=30`，对齐 OKX `RECONCILE_INTERVAL_SEC`）：①补 WS 漏推（`_check_missed_fills` 用 REST 查 filled 补发虚拟 on_fill）②查交易所实际持仓与本地 opens-closes 对比，差 ≥1 张自动修复（交易所为准）③零头（`okx_sz % POSITION_SZ`）→ WARN 要求人工平仓
   - **单一共享快照**：`_do_reconcile` 顶部一次性相邻取 `open_orders`+`positions`，`open_ids` 传给 `_check_missed_fills`、`exch_sz` 从同一持仓快照算，避免「订单列表 vs 持仓」两次异步 REST 时间差致同一笔被双算（FUTUUSDT 2026-06-24，见坑表/memory `bitget-reconcile-double-count`）
   - **diff 修复摘 oid**：diff<0 时 `closes+=n` 前把不在 `open_ids` 的 BUY 从 `pending_buys` 摘掉，迟到的 WS 推送被 `on_fill` 幂等丢弃。原则：计数只走 missed_fill→on_fill 一条 oid 路径，diff 仅兜底真正外部漂移
   - **diff 修复平仓必须下移 stack_top**：diff 路径拿不到成交价，用当前市价重锚（仅在市价 < stack_top 时下移，不上抬）。否则 oid 丢失时全部平仓走 diff、stack_top 锚死高位、SELL 不跟行情=网格冻结亏钱（REDUSDT 2026-07-05）。OKX 对应：`_handle_missed_fill` 的 `stack_top=fill_px`
@@ -107,7 +107,7 @@ python3 monitor.py
 ```
 ① get_contracts（合约元信息）→ ② _check_account_config（合约有效 + 单向 + 3x 杠杆，失败 exit 1）
 → ③ _cancel_stale_pending_on_startup（清旧挂单）→ ④ _adopt_position 接管 或 _open 起仓
-→ ⑤ _refresh_orders 挂网格 → ⑥ 启动 WS 线程 + 进入 60s 对账主循环
+→ ⑤ _refresh_orders 挂网格 → ⑥ 启动 WS 线程 + 进入 30s 对账主循环
 ```
 
 每次启动 `_load_state` 都**删旧 pkl 并备份为 `.bak`**（不复用旧状态，以交易所实际持仓为准）。
@@ -146,7 +146,8 @@ REST 每 60s 全量扫描（无 WS）：
 | 单向持仓下单被拒 | 传了 posSide/tradeSide | one_way_mode 不传方向字段（已） |
 | 撤单报 `25204` | 订单已成交/已撤 | `_safe_cancel` 视为成功（已） |
 | BUY 被系统反复撤→限频 | 同价位无脑重挂 | 120s 内撤 ≥3 次→退避 180s（已） |
-| WS 漏推成交不动 | 推送丢失 | 60s 对账 `_check_missed_fills` REST 补发虚拟 on_fill（已） |
+| WS 漏推成交不动 | 推送丢失 | 30s 对账 `_check_missed_fills` REST 补发虚拟 on_fill（已） |
+| **强趋势行情反复误报「挂单形态异常/策略可能已停止」**（ESPORTSUSDT 2026-07-19） | WS 漏推一笔 SELL 成交时 `pending_sell_ord_id` 仍指向已成交单、交易所无挂 SELL，旧 `RECONCILE_SEC=60` 要等 60s 才补挂，恰与 monitor 60s 形态探针同频共振→连续多次抓到 SELL=0 误报（进程实为存活）。OKX 无此问题因其对账 30s | `RECONCILE_SEC` 60→30 对齐 OKX `RECONCILE_INTERVAL_SEC`，漏推 SELL 最多 30s 补上，打破与探针同频；5s settle 防抖保证不打限频（已） |
 | **频繁"对账漂移"、成交全靠对账补**（TNSRUSDT 2026-06-21） | 旧 `ws_connect` 只发 ping 不检测 pong，TCP 半开/被 NAT 静默掐断时 `async for` 永久阻塞、不报错不重连 → 僵尸连接静默丢消息（官方文档：收不到 pong 即应重连） | `ws_connect` 加应用层 ping + pong/消息超时判僵尸 → 主动重连（退避）+ 重连后强制对账补空窗（已） |
 | 部分成交零头进 stack | accFillSz 非整张 | 检测 `% POSITION_SZ` → WARN 要求人工平仓，不进 stack（已） |
 | WS+对账并发重复挂单 | 两路同时改状态 | `on_fill`/`_refresh_orders` 用 `RLock` 串行（已） |

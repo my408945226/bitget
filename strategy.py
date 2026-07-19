@@ -147,7 +147,12 @@ class Strategy:
         self.GRID_PCT = cfg.grid_pct
         self.POSITION_SZ = cfg.size
         self.MAX_BUYS = 60
-        self.RECONCILE_SEC = 60
+        # 对账周期对齐 OKX（RECONCILE_INTERVAL_SEC=30）。原为 60s：WS 漏推一笔 SELL
+        # 成交时，pending_sell_ord_id 仍指向已成交单、交易所上无挂 SELL，要等一整个对账
+        # 周期才补挂。60s 周期恰好与 monitor 60s 形态探针同频共振 → 探针连续多次抓到
+        # SELL=0 → 误报「策略可能已停止」（ESPORTSUSDT 2026-07-19 强趋势行情）。改 30s
+        # 后漏推 SELL 最多 30s 补上，打破与探针的同频，且有 5s settle 防抖不会打限频。
+        self.RECONCILE_SEC = 30
         # BUY 重挂退避：同价位窗口内被系统撤 ≥N 次 → 退避一段时间不挂
         self.BUY_CANCEL_BACKOFF_N = 3
         self.BUY_CANCEL_WINDOW_SEC = 120
@@ -155,7 +160,7 @@ class Strategy:
         self._buy_cancel_hits = {}   # px_key -> [被撤时间戳]
         self._buy_backoff = {}       # px_key -> 退避截止时间
         self.contract_info: dict = {}
-        self.last_reconcile_ts = 0.0   # 主循环对账调度时间戳（每 60s）
+        self.last_reconcile_ts = 0.0   # 主循环对账调度时间戳（每 RECONCILE_SEC=30s）
         self.last_fill_ts = 0.0        # 最近一次成交时间戳（对账防 race 专用，与调度分开）
         self.last_refresh_ts = 0.0
         self._lock = threading.RLock()
