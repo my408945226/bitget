@@ -80,14 +80,16 @@ python3 monitor.py
 - **`_cycle_complete` 收尾 = 撤单 + 扫尾平残留 + 退出（对齐 OKX）**：一轮结束（opens==closes）即撤所有挂单，再用 `_sweep_residual_position` 以 reduceOnly 市价把交易所仍残留的裸头（竞态多算 closes 残留的 ~1 单 / partial 漏账等）**平掉**后 exit(0)。**不再**「实盘≠0 就重建网格续跑」并反复弹「平仓不彻底：实盘仍有 ~1 单」告警（ACEUSDT 2026-07-19）——真正的收尾语义是 OKX 那样清掉残留收工。灰尘（对齐后 < 最小下单额）才平不掉，由 `_sweep_residual_position` 告警留人工
 - **退出前扫尾 `_sweep_residual_position`**：正常退出分支撤光挂单后，再查一次真实持仓，有裸头（partial fill 漏账 / 撤单空窗刚成交）用 **reduceOnly 市价单**平掉（只减不增，已平不反手）；**灰尘**（数量取整为 0 / 名义 < `minTradeUSDT`）平不掉必被拒 → 告警留人工，不硬下；失败也告警不吞异常
 
-## 网格运行逻辑（`_refresh_orders`）
+## 网格运行逻辑（`_refresh_sell_only` / `_refresh_orders`）
 
 - **SELL 唯一**：永远只 1 个 @ `stack_top × (1+grid)`，过 `_can_open_sell` 风控；
-  挂单成功记 `pending_sell_ord_id`/`pending_sell_px`；交易所拒单（限价带等）**不降级不退出**，仅告警等回落
-- **BUY 梯队**：depth = `min(持仓张数, MAX_BUYS=60)`，几何价位 `stack_top × (1-grid)^i`，
-  `reduceOnly` 固定配对单（`entry_px` 记录后永不改动）
-- **SELL 成交** → `stack_top=成交价`, opens++, refresh
-- **BUY 成交** → `stack_top=成交价`（下移，使加仓 SELL 重新锚定 `成交价×(1+grid)` 跟随行情下移，与 OKX `_handle_close_filled` 一致；漏此步会让 SELL 冻结在最高价、网格脱离行情而亏钱），closes++，PnL 用该 BUY 挂单时记录的 `entry_px`（非 stack_top）；一轮完成（opens==closes>0）则 `_cycle_complete` 撤所有单 + `sys.exit(0)`
+  挂单成功记 `pending_sell_ord_id`/`pending_sell_px`；交易所拒单（限价带等）**不降级不退出**，仅告警等回落。SELL 的增删统一走 `_refresh_sell_only`（对齐 OKX `_refresh_sell_only_locked`）
+- **BUY 梯队 = 固定配对单，挂出后价格永不改动（对齐 OKX，churn 治本）**：每张持仓恰好 1 个 `reduceOnly` BUY @ 该张入场价×(1-grid)，`entry_px`/`target_px` 记录后**永不重定价**。depth = `min(持仓张数, MAX_BUYS=60)`。
+  - **成交后只按数量增减、不因 stack_top 移动整排重挂**：SELL 成交 → `_post_add_place_buy` 为新仓挂 1 个 BUY @ 成交价×(1-grid)（防守：pending≥持仓先撤最深腾位防 reduceOnly 超量）；BUY 成交 → 那档 pop、其余不动。
+  - 全量 `_refresh_orders`（仅启动/对账/BUY 被撤补缺用）：多了撤最深（价最低）、少了 `_pad_missing_buys` 几何补缺（`stack_top×(1-grid)^i`），**已挂的一律不动**。
+  - ⚠️ **旧实现每次成交都 `_refresh_orders()` 按新 stack_top 整排重算 BUY 价、容差不匹配即撤挂**——强趋势行情 stack_top 频繁上下移 → 整排反复撤挂（ESPORTSUSDT 2026-07-19：909 次下单 / 306 次被撤）。已改为 OKX 固定配对模型
+- **SELL 成交** → `stack_top=成交价`, opens++, `_post_add_place_buy` + `_refresh_sell_only`
+- **BUY 成交** → `stack_top=成交价`（下移，使加仓 SELL 重新锚定 `成交价×(1+grid)` 跟随行情下移，与 OKX `_handle_close_filled` 一致；漏此步会让 SELL 冻结在最高价、网格脱离行情而亏钱），closes++，那档 BUY pop、其余 BUY 不动，只 `_refresh_sell_only`，PnL 用该 BUY 挂单时记录的 `entry_px`（非 stack_top）；一轮完成（opens==closes>0）则 `_cycle_complete` 撤所有单 + 扫尾 + `sys.exit(0)`
 - **BUY 被系统撤** → 退避计数：同价位 120s 窗口被撤 ≥3 次 → 退避 180s 不挂（`_note_buy_cancel`/`_in_backoff`），避免无脑重挂打限频
 - **`_place_sell` 强制单例**：检测到已有 pending SELL → **先撤旧再挂新**（对齐 OKX `_refresh_sell_only_locked`，撤旧→清引用→挂新）。**不再 `sys.exit(1)` 自杀**——旧设计任何补挂/竞态重入都会误报「多个 SELL」杀进程留裸仓（VELODROMEUSDT 2026-07-04）
 
@@ -151,6 +153,7 @@ REST 每 60s 全量扫描（无 WS）：
 | **频繁"对账漂移"、成交全靠对账补**（TNSRUSDT 2026-06-21） | 旧 `ws_connect` 只发 ping 不检测 pong，TCP 半开/被 NAT 静默掐断时 `async for` 永久阻塞、不报错不重连 → 僵尸连接静默丢消息（官方文档：收不到 pong 即应重连） | `ws_connect` 加应用层 ping + pong/消息超时判僵尸 → 主动重连（退避）+ 重连后强制对账补空窗（已） |
 | 部分成交零头进 stack | accFillSz 非整张 | 检测 `% POSITION_SZ` → WARN 要求人工平仓，不进 stack（已） |
 | WS+对账并发重复挂单 | 两路同时改状态 | `on_fill`/`_refresh_orders` 用 `RLock` 串行（已） |
+| **强趋势行情下单/撤单暴量（909 下单 / 306 被撤，1 小时内）**（ESPORTSUSDT 2026-07-19） | 旧 `_refresh_orders` 每次成交都按新 stack_top 整排重算 BUY 价、容差不匹配即撤挂；强趋势下 SELL/BUY 交替成交令 stack_top 频繁上下移 → 整排 BUY 反复撤挂。且交易所对 reduceOnly 超量 BUY 自动撤单（持仓一缩即撤超出部分）叠加放大 | 移植 OKX 固定配对模型：BUY 挂出后价格永不改动，成交后只按数量增减（SELL 成交 `_post_add_place_buy` 加 1、BUY 成交 pop 1），全量 refresh 只裁多余/`_pad_missing_buys` 补缺、已挂不动；成交路径只 `_refresh_sell_only` 不碰 BUY（已） |
 | TG 报警 400 丢失 | 裸 `<` 被当 HTML 标签 | 用 `≤`/`&lt;`（已） |
 | monitor 对手动/其它策略持仓误报形态异常 | 探针假设每个持仓都是金字塔网格 | 只检查有 `state_short_pyramid_<sym>.pkl` 的合约（`_managed_instruments`，已） |
 | WS 漏推兜底从不生效 | `_check_missed_fills` 用错字段 `orderStatus`/`avgPrice`（Bitget v3 是 `status`/`priceAvg`） | 兼容两种命名 `info.get("status") or info.get("orderStatus")`（已） |

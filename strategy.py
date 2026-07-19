@@ -824,7 +824,11 @@ class Strategy:
             level="TRADE",
         )
         self._save()
-        self._refresh_orders()
+        # SELL 成交后：①为这张新仓挂 1 个固定配对 BUY（其他 BUY 一律不动）②SELL 上移。
+        # 对齐 OKX _handle_add_filled：不再整排重挂 BUY——每次成交把整排几何 BUY 按新
+        # stack_top 重算重挂，正是 ESPORTSUSDT 强趋势下 909 次下单/306 次被撤的 churn 根源。
+        self._post_add_place_buy(px)
+        self._refresh_sell_only()
 
     def _handle_sell_cancel(self, order: dict):
         """SELL 被撤 → 重挂同价位"""
@@ -836,7 +840,8 @@ class Strategy:
 
         self.state["pending_sell_ord_id"] = None
         self._save()
-        self._refresh_orders()
+        # 只重挂 SELL，不碰 BUY 梯队（对齐 OKX reorder_after_canceled）
+        self._refresh_sell_only()
 
     def _handle_buy_fill(self, order: dict):
         """BUY 成交 → 平仓（与 OKX 版 _handle_close_filled 一致）"""
@@ -875,7 +880,9 @@ class Strategy:
         if opens > 0 and opens == closes:
             self._cycle_complete()
         else:
-            self._refresh_orders()
+            # BUY 平仓成交后只下移 SELL，BUY 梯队一律不动（成交的那档已 pop，其余固定
+            # 配对单价格不变）。对齐 OKX _handle_close_filled 尾部的 _refresh_sell_only。
+            self._refresh_sell_only()
 
     def _handle_buy_cancel(self, order: dict):
         """BUY 被撤 → 退避计数后重挂（能进到这里说明非本策略主动撤 = 系统撤）
@@ -954,8 +961,10 @@ class Strategy:
         )
         sys.exit(0)
 
-    def _refresh_orders(self):
-        """刷新网格（SELL 唯一，BUY 数量 = min(持仓, MAX_BUYS)）"""
+    def _refresh_sell_only(self):
+        """只刷 SELL（永远只 1 个 @ stack_top×(1+GRID)）。BUY 是固定配对单，成交后
+        只动 SELL、不碰 BUY 梯队——对齐 OKX `_refresh_sell_only_locked`。SELL/BUY 成交、
+        SELL 被撤都走这里；整排重建的全量 `_refresh_orders` 仅启动/对账用。"""
         with self._lock:
             self.last_refresh_ts = time.time()
 
@@ -968,11 +977,10 @@ class Strategy:
             # 限价/基准起仓等待态：opens==0 且初始 SELL 还挂着等成交 → 原样不动。
             # 初始 SELL 挂在 stack_top（--limit）或基准价×(1+grid)（--adopt）处，
             # 若此时按 stack_top×(1+grid) 重算会把它误撤、又因 n_pos==0 不补，导致空挂。
-            # 等它成交后 _handle_sell_fill 置 opens=1 再走正常网格。
             if n_pos == 0 and self.state.get("pending_sell_ord_id"):
                 return
 
-            # ① SELL 唯一：永远只有 1 个 @ stack_top × (1+GRID)
+            # SELL 唯一：永远只有 1 个 @ stack_top × (1+GRID)
             sell_px = self._round_px(stack_top * (1 + self.GRID_PCT))
             cur_sell_id = self.state.get("pending_sell_ord_id")
             cur_sell_px = self.state.get("pending_sell_px")
@@ -984,16 +992,83 @@ class Strategy:
                         sys.exit(1)
                     # ★ 撤单成功后必须立即清 pending_sell_*，否则紧接着的 _place_sell
                     # 会读到旧 id 误判「多个 SELL」而 sys.exit(1)（BGBUSDT 2026-07-02）。
-                    # 对齐 OKX _refresh_sell_only_locked：撤单直后即置 None 再挂新单。
                     self.state["pending_sell_ord_id"] = None
                     self.state["pending_sell_px"] = None
                 if n_pos > 0:
                     self._place_sell(sell_px)
+            self._save()
 
-            # ② BUY 梯队：depth = min(持仓, MAX_BUYS)
+    def _post_add_place_buy(self, fill_px: float):
+        """加仓（SELL）成交后，为这张新仓挂 1 个固定配对 BUY @ fill_px×(1-GRID)，
+        其余 BUY 一律不动（对齐 OKX `_handle_add_filled` 尾部）。
+        防守：pending_buys 数 ≥ 持仓数时先撤最深的（价最低）腾位，防 reduceOnly 超量
+        被交易所撤。BUY 的 entry_px 记录后永不改动（固定配对）。"""
+        with self._lock:
+            pending = self.state.get("pending_buys", {})
+            if "pending_buys" not in self.state:
+                self.state["pending_buys"] = pending
+            n_pos = max(0, self.state.get("opens", 0) - self.state.get("closes", 0))
+            while pending and len(pending) >= n_pos:
+                lowest_id, lowest_info = min(
+                    pending.items(),
+                    key=lambda kv: float(kv[1].get("target_px") or 0))
+                self.log.warning(f"[加仓后] BUY 配对数 {len(pending)} ≥ 持仓 {n_pos}，"
+                                 f"撤最深 @ {lowest_info.get('target_px')} 腾位防 reduceOnly 超量")
+                self._safe_cancel(lowest_id)
+                pending.pop(lowest_id, None)
+            tpx = self._round_px(fill_px * (1 - self.GRID_PCT))
+            self._place_buy(fill_px, tpx)
+            self._save()
+
+    def _pad_missing_buys(self, depth: int) -> int:
+        """按几何梯队 stack_top×(1-GRID)^i 补齐缺失的 BUY 至 depth 个。已挂 BUY 永不
+        重定价，只补缺；容差跳过已覆盖价位，退避价位不挂。对齐 OKX `_pad_missing_buys`。
+        返回实际补挂数。"""
+        stack_top = self.state.get("stack_top", 0)
+        pending = self.state.get("pending_buys", {})
+        missing = depth - len(pending)
+        if stack_top <= 0 or missing <= 0:
+            return 0
+        tol = max(1e-9, stack_top * self.GRID_PCT * 0.4)
+        current_pxs = [float(v.get("target_px", 0)) for v in pending.values()]
+        placed = 0
+        for i in range(1, depth + 1):
+            if placed >= missing:
+                break
+            tpx = self._round_px(stack_top * ((1 - self.GRID_PCT) ** i))
+            epx = stack_top * ((1 - self.GRID_PCT) ** (i - 1))
+            if any(abs(tpx - c) < tol for c in current_pxs):
+                continue
+            if self._in_backoff(tpx):
+                continue  # 该价位退避中，等退避结束后由对账补挂
+            self._place_buy(epx, tpx)
+            placed += 1
+        return placed
+
+    def _refresh_orders(self):
+        """全量刷新网格（仅启动 / 对账 / BUY 被撤补缺用）。SELL 唯一；BUY 是固定配对
+        单，**永不因 stack_top 移动而重定价**——只在数量对不上时裁剪多余（撤最深）或按
+        几何梯队补缺。对齐 OKX `_refresh_orders_locked`。成交后的增量维护走
+        `_refresh_sell_only` + `_post_add_place_buy`，不再整排重建（churn 根源）。"""
+        with self._lock:
+            stack_top = self.state.get("stack_top", 0)
+            if stack_top <= 0:
+                return
+
+            # ① SELL 委托单一入口
+            self._refresh_sell_only()
+
+            n_pos = max(0, self.state.get("opens", 0) - self.state.get("closes", 0))
+
+            # 等待态：opens==0 且初始 SELL 挂着 → BUY 也不动
+            if n_pos == 0 and self.state.get("pending_sell_ord_id"):
+                return
+
+            pending = self.state.get("pending_buys", {})
+
+            # ② 无持仓 → 撤所有 BUY
             if n_pos == 0:
-                # 无持仓则撤所有 BUY
-                for oid in list(self.state.get("pending_buys", {}).keys()):
+                for oid in list(pending.keys()):
                     if not self._safe_cancel(oid):
                         self.log.error(f"撤 BUY 失败: {oid}，快速失败")
                         sys.exit(1)
@@ -1001,43 +1076,20 @@ class Strategy:
                 self._save()
                 return
 
+            # ③ BUY 数量对齐到 depth：多了撤最深（价最低），少了几何补缺，已挂的不重定价
             depth = min(n_pos, self.MAX_BUYS)
-            desired = []
-            for i in range(1, depth + 1):
-                tpx = self._round_px(stack_top * ((1 - self.GRID_PCT) ** i))
-                epx = stack_top * ((1 - self.GRID_PCT) ** (i - 1))
-                desired.append((tpx, epx))
+            excess = len(pending) - depth
+            if excess > 0:
+                by_px_asc = sorted(pending.items(),
+                                   key=lambda kv: float(kv[1].get("target_px") or 0))
+                for oid, info in by_px_asc[:excess]:
+                    if not self._safe_cancel(oid):
+                        self.log.error(f"撤 BUY 失败: {oid}，快速失败")
+                        sys.exit(1)
+                    pending.pop(oid, None)
+                    self.log.info(f"裁剪多余 BUY @ {info.get('target_px')}")
 
-            pending = self.state.get("pending_buys", {})
-            tol = max(1e-9, stack_top * self.GRID_PCT * 0.4)
-
-            # ③ 撤销不需要的单（多了裁最深的 = 价格最低的 BUY）
-            to_cancel = []
-            for oid, info in pending.items():
-                if not any(abs(float(info.get("target_px", 0)) - d[0]) < tol for d in desired):
-                    to_cancel.append(oid)
-
-            # 如果要撤的单数 > depth，只撤最深的（最低价）
-            if len(to_cancel) > len(desired) - len(pending) + len(to_cancel):
-                # 按价格排序，撤最低的
-                to_cancel.sort(key=lambda oid: float(pending[oid].get("target_px", float('inf'))))
-                to_cancel = to_cancel[:len(to_cancel) - (depth - len(pending) + len(to_cancel))]
-
-            for oid in to_cancel:
-                if not self._safe_cancel(oid):
-                    self.log.error(f"撤 BUY 失败: {oid}，快速失败")
-                    sys.exit(1)
-                pending.pop(oid, None)
-
-            # ④ 挂缺少的单（补几何梯队，退避中的价位跳过）
-            current_pxs = [float(v.get("target_px", 0)) for v in pending.values()]
-            for tpx, epx in desired:
-                if any(abs(tpx - c) < tol for c in current_pxs):
-                    continue
-                if self._in_backoff(tpx):
-                    continue  # 该价位退避中，等退避结束后由对账补挂
-                self._place_buy(epx, tpx)
-
+            self._pad_missing_buys(depth)
             self._save()
 
     def _can_open_sell(self, px: float) -> bool:
